@@ -12,7 +12,14 @@
  *   S3_REGION      — region (use "auto" for R2, "us-east-1" for MinIO)
  */
 
-import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import {
+  S3Client,
+  PutObjectCommand,
+  DeleteObjectCommand,
+  GetObjectCommand,
+  CreateBucketCommand,
+  HeadBucketCommand,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 function getS3Client(): S3Client {
@@ -30,6 +37,22 @@ function getS3Client(): S3Client {
 
 const BUCKET = process.env.S3_BUCKET ?? 'travelbuddy';
 
+let bucketEnsured = false;
+
+async function ensureBucket(s3: S3Client): Promise<void> {
+  if (bucketEnsured) return;
+  try {
+    await s3.send(new HeadBucketCommand({ Bucket: BUCKET }));
+  } catch {
+    try {
+      await s3.send(new CreateBucketCommand({ Bucket: BUCKET }));
+    } catch {
+      // Already exists or no permission — proceed anyway
+    }
+  }
+  bucketEnsured = true;
+}
+
 /**
  * Upload a file buffer to S3.
  * Returns the storage path (S3 object key) for later retrieval.
@@ -43,6 +66,7 @@ export async function uploadArtifact(
   tripId: string,
 ): Promise<string> {
   const s3 = getS3Client();
+  await ensureBucket(s3);
   // Sanitize fileName: replace spaces and special chars
   const safe = fileName.replace(/[^a-zA-Z0-9._\-() ]/g, '_');
   const storagePath = `artifacts/${tripId}/${safe}`;
