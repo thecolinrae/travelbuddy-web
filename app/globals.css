@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Light theme (from constants/theme.ts LightColors) ─────────────────────── */
+:root {
+  /* RGB triplets for Tailwind alpha support */
+  --color-primary:       26 115 232;    /* #1a73e8 */
+  --color-primary-dark:  21 87 176;     /* #1557b0 */
+  --color-secondary:     13 148 136;    /* #0d9488 */
+  --color-accent:        245 158 11;    /* #f59e0b */
+
+  --color-background:    240 244 255;   /* #f0f4ff */
+  --color-card:          255 255 255;   /* #ffffff */
+  --color-surface:       248 250 252;   /* #f8fafc */
+
+  --color-text:          30 41 59;      /* #1e293b */
+  --color-text-muted:    100 116 139;   /* #64748b */
+  --color-text-light:    148 163 184;   /* #94a3b8 */
+
+  --color-success:       34 197 94;     /* #22c55e */
+  --color-warning:       245 158 11;    /* #f59e0b */
+  --color-error:         239 68 68;     /* #ef4444 */
+
+  --color-muted:         148 163 184;   /* #94a3b8 */
+  --color-border:        226 232 240;   /* #e2e8f0 */
+  --color-divider:       241 245 249;   /* #f1f5f9 */
+
+  --font-sans: ui-sans-serif, system-ui, sans-serif;
+}
+
+/* ── Dark theme (from constants/theme.ts DarkColors) ───────────────────────── */
+.dark {
+  --color-primary:       77 163 255;    /* #4da3ff */
+  --color-primary-dark:  41 121 255;    /* #2979ff */
+  --color-secondary:     20 184 166;    /* #14b8a6 */
+  --color-accent:        251 191 36;    /* #fbbf24 */
+
+  --color-background:    15 23 42;      /* #0f172a */
+  --color-card:          30 41 59;      /* #1e293b */
+  --color-surface:       22 32 50;      /* #162032 */
+
+  --color-text:          241 245 249;   /* #f1f5f9 */
+  --color-text-muted:    148 163 184;   /* #94a3b8 */
+  --color-text-light:    100 116 139;   /* #64748b */
+
+  --color-success:       74 222 128;    /* #4ade80 */
+  --color-warning:       251 191 36;    /* #fbbf24 */
+  --color-error:         248 113 113;   /* #f87171 */
+
+  --color-muted:         100 116 139;   /* #64748b */
+  --color-border:        51 65 85;      /* #334155 */
+  --color-divider:       30 41 59;      /* #1e293b */
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-text-base;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}

@@ -1,0 +1,45 @@
+version: '3.9'
+
+# ── Production overrides ───────────────────────────────────────────────────────
+# Usage: make up
+# Combines with docker-compose.yml: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+  web:
+    build:
+      context: .
+      target: runner       # use the optimized production stage
+    command: node server.js
+    volumes: []            # no source mounts in production
+    restart: unless-stopped
+    ports: []              # Caddy handles external port 80/443; internal only
+    environment:
+      NODE_ENV: production
+
+  db:
+    ports: []              # don't expose PostgreSQL externally
+    restart: unless-stopped
+
+  storage:
+    ports:
+      - '9000:9000'        # S3 API (accessible to web service via internal network)
+    # Remove console port in production for security
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'      # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+
+volumes:
+  caddy_data:
+  caddy_config:

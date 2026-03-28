@@ -1,0 +1,27 @@
+# dependencies
+node_modules/
+
+# next.js
+.next/
+out/
+
+# env files (NEVER commit secrets)
+.env
+.env.local
+.env.*.local
+
+# prisma generated client (generated on install)
+prisma/generated/
+
+# docker volumes (local)
+postgres_data/
+minio_data/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# editor
+.idea/
+.vscode/
+*.swp

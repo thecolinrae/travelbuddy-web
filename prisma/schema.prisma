@@ -1,0 +1,122 @@
+// TravelBuddy web — PostgreSQL schema
+// Replaces the Google Drive file-per-trip storage model
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── User profile (keyed by Google OAuth sub) ────────────────────────────────
+
+model Profile {
+  id                String   @id               // Google OAuth sub (providerAccountId)
+  email             String   @unique
+  name              String?
+  avatarUrl         String?
+  preferredCurrency String   @default("USD")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  trips             Trip[]
+  receivedShares    TripShare[] @relation("SharedWithUser")
+}
+
+// ── Trip ─────────────────────────────────────────────────────────────────────
+
+model Trip {
+  id                String    @id @default(cuid())
+  userId            String
+  name              String
+  destination       String    @default("")
+  destinations      String[]  @default([])
+  startDate         String?                     // YYYY-MM-DD
+  endDate           String?                     // YYYY-MM-DD
+  status            String    @default("upcoming")
+  coverEmoji        String    @default("✈️")
+  itineraryMd       String?                     // AI-generated markdown (display only)
+  budgetGoal        Float?
+  categoryGoals     Json?                       // Partial<Record<BudgetItemCategory, number>>
+  preferredCurrency String    @default("USD")
+  ownerEmail        String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  profile           Profile   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  timelineEvents    TimelineEvent[]
+  activities        Activities?
+  artifacts         Artifact[]
+  shares            TripShare[]
+
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+// ── Timeline events (discriminated union stored as JSONB) ────────────────────
+
+model TimelineEvent {
+  id              String    @id @default(cuid())
+  tripId          String
+  eventType       String                        // 'flight', 'hotel', 'otherTransportation', 'expense', 'activity'
+  eventSubtype    String?                       // 'departure', 'arrival', 'check_in', 'check_out', etc.
+  data            Json                          // full typed TimelineEvent (discriminated union)
+  eventDate       String?                       // YYYY-MM-DD for date-based indexing
+  sortUtc         DateTime?                     // accurate chronological ordering
+  journeyId       String?                       // groups dep+arr events from the same flight booking
+  artifactSources String[]  @default([])
+  createdAt       DateTime  @default(now())
+
+  trip            Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([tripId, eventDate])
+  @@index([tripId, sortUtc])
+  @@index([tripId, journeyId])
+}
+
+// ── Activities (suggestions + saved) ────────────────────────────────────────
+
+model Activities {
+  id          String   @id @default(cuid())
+  tripId      String   @unique
+  destination String?
+  data        Json                              // Activity[]
+  updatedAt   DateTime @updatedAt
+
+  trip        Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+}
+
+// ── Uploaded artifact files ──────────────────────────────────────────────────
+
+model Artifact {
+  id          String   @id @default(cuid())
+  tripId      String
+  fileName    String
+  mimeType    String
+  storagePath String                            // S3 object key: artifacts/{tripId}/{fileName}
+  size        BigInt?
+  createdAt   DateTime @default(now())
+
+  trip        Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([tripId])
+}
+
+// ── Trip sharing ─────────────────────────────────────────────────────────────
+
+model TripShare {
+  id               String   @id @default(cuid())
+  tripId           String
+  ownerId          String
+  sharedWithEmail  String
+  sharedWithUserId String?                      // null until recipient signs in
+  createdAt        DateTime @default(now())
+
+  trip             Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  sharedWithUser   Profile? @relation("SharedWithUser", fields: [sharedWithUserId], references: [id])
+
+  @@unique([tripId, sharedWithEmail])
+  @@index([sharedWithEmail])
+  @@index([sharedWithUserId])
+}
