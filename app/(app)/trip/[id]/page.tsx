@@ -29,6 +29,7 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
     status: trip.status,
     coverEmoji: trip.coverEmoji,
     itineraryMd: trip.itineraryMd,
+    notes: trip.notes,
     budgetGoal: trip.budgetGoal,
     categoryGoals: trip.categoryGoals,
     preferredCurrency: trip.preferredCurrency,

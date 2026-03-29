@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { FileUploadZone } from '@/components/import/FileUploadZone';
 import { TextPasteModal } from '@/components/import/TextPasteModal';
-import { GmailPickerModal } from '@/components/import/GmailPickerModal';
+import { GmailPickerPanel } from '@/components/import/GmailPickerPanel';
 import { ImportProgress } from '@/components/import/ImportProgress';
 import { COMMON_CURRENCIES } from '@/services/currency';
 import type { GmailMessage } from '@/services/gmail';
@@ -35,7 +35,7 @@ export default function ImportPage() {
   const [tripMode, setTripMode] = useState('new');
   const [existingTrips, setExistingTrips] = useState<TripRow[]>([]);
   const [textModalOpen, setTextModalOpen] = useState(false);
-  const [gmailModalOpen, setGmailModalOpen] = useState(false);
+  const [gmailOpen, setGmailOpen] = useState(false);
   const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState<ProgressState | null>(null);
 
@@ -161,6 +161,17 @@ export default function ImportPage() {
     return <ClipboardPaste className="h-4 w-4 text-muted-foreground shrink-0" />;
   }
 
+  if (gmailOpen) {
+    return (
+      <main className="max-w-2xl mx-auto px-4 py-8 flex flex-col" style={{ height: 'calc(100vh - 4rem)' }}>
+        <GmailPickerPanel
+          onBack={() => setGmailOpen(false)}
+          onSelect={(emails) => { addEmails(emails); setGmailOpen(false); }}
+        />
+      </main>
+    );
+  }
+
   return (
     <>
       <main className="max-w-2xl mx-auto px-4 py-8 space-y-8">
@@ -179,7 +190,7 @@ export default function ImportPage() {
               <ClipboardPaste className="h-4 w-4" />
               Paste text
             </Button>
-            <Button variant="outline" className="gap-2" onClick={() => setGmailModalOpen(true)}>
+            <Button variant="outline" className="gap-2" onClick={() => setGmailOpen(true)}>
               <Mail className="h-4 w-4" />
               From Gmail
             </Button>
@@ -279,13 +290,7 @@ export default function ImportPage() {
         onSubmit={addText}
       />
 
-      <GmailPickerModal
-        open={gmailModalOpen}
-        onClose={() => setGmailModalOpen(false)}
-        onSelect={addEmails}
-      />
-
-      {importing && progress && (
+{importing && progress && (
         <ImportProgress
           step={progress.step}
           completed={progress.completed}

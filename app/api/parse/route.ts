@@ -1,3 +1,4 @@
+import { after } from 'next/server';
 import { auth } from '@/lib/auth';
 import {
   parseDocumentBuffer,
@@ -6,6 +7,7 @@ import {
   generateItinerary,
   parseConcurrent,
   CLAUDE_PARSE_CONCURRENCY,
+  suggestActivities,
 } from '@/services/claude';
 import {
   buildTimeline,
@@ -20,11 +22,15 @@ import {
   updateTrip,
   saveTimeline,
   loadTimeline,
+  loadActivities,
+  saveActivities,
   createArtifactRecord,
   getTrip,
+  updateTripCoverPhoto,
 } from '@/services/db';
 import { uploadArtifact } from '@/services/storage';
-import type { ParsedArtifact } from '@/types';
+import { fetchDestinationPhoto } from '@/services/photos';
+import type { ParsedArtifact, Activity } from '@/types';
 import type { GmailMessage } from '@/services/gmail';
 
 type ProgressEvent =
@@ -223,7 +229,71 @@ export async function POST(request: Request) {
           }
         }
 
+        // Persist Gmail emails as HTML artifacts so they appear in the Documents tab
+        for (const task of tasks) {
+          if (task.kind !== 'email') continue;
+          try {
+            const { email } = task;
+            const html = email.htmlBody
+              ? email.htmlBody
+              : `<!DOCTYPE html><html><body><pre style="white-space:pre-wrap">${
+                  email.body.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                }</pre></body></html>`;
+            const buffer = Buffer.from(html, 'utf-8');
+            const safeName = (email.subject || 'email')
+              .replace(/[^\w\s-]/g, '')
+              .trim()
+              .slice(0, 60) || 'email';
+            const fileName = `${safeName}.html`;
+            const storagePath = await uploadArtifact(buffer, fileName, 'text/html', savedTripId);
+            await createArtifactRecord(savedTripId, fileName, 'text/html', storagePath, buffer.length);
+          } catch {
+            // non-fatal
+          }
+        }
+
         send({ type: 'done', tripId: savedTripId });
+
+        // Auto-generate activity recommendations for new destinations in the background.
+        // Runs after the SSE response is closed so the user is not waiting.
+        const _uniqueDests = uniqueDests;
+        const _savedTripId = savedTripId;
+        const _startDate = overallStartDate;
+        const _endDate = overallEndDate;
+        const _primaryDestination = primaryDestination;
+        const _isNewTrip = !tripId;
+        after(async () => {
+          try {
+            const existing = await loadActivities(_savedTripId);
+            const coveredCities = new Set(
+              (existing?.savedActivities ?? []).map((a) => a.city).filter(Boolean),
+            );
+            const newDests = _uniqueDests.filter((d) => !coveredCities.has(d));
+            if (newDests.length === 0) return;
+
+            const allNew: Activity[] = [];
+            for (const dest of newDests) {
+              const suggestions = await suggestActivities(dest, _startDate || '', _endDate || '');
+              allNew.push(...suggestions.map((a) => ({ ...a, city: dest, saved: true as const })));
+            }
+            await saveActivities(_savedTripId, _uniqueDests[0] ?? '', [
+              ...(existing?.savedActivities ?? []),
+              ...allNew,
+            ]);
+          } catch {
+            // non-fatal — user can still manually refresh via the Activities tab
+          }
+
+          // Fetch destination cover photo for newly created trips only
+          if (_isNewTrip && _primaryDestination) {
+            try {
+              const photoUrl = await fetchDestinationPhoto(_primaryDestination);
+              if (photoUrl) await updateTripCoverPhoto(_savedTripId, photoUrl);
+            } catch {
+              // non-fatal
+            }
+          }
+        });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'An unexpected error occurred.';
         send({ type: 'error', message });

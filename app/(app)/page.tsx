@@ -2,7 +2,7 @@ import { auth } from '@/lib/auth';
 import { listTrips } from '@/services/db';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
-import { Plus } from 'lucide-react';
+import { Plus, MapPin } from 'lucide-react';
 import { TripCard } from '@/components/TripCard';
 import { Button } from '@/components/ui/button';
 import type { TripRow } from '@/services/db';
@@ -32,7 +32,9 @@ export default async function TripsPage() {
 
       {trips.length === 0 && (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-16 gap-4 text-center">
-          <span className="text-4xl">✈️</span>
+          <div className="rounded-full bg-surface p-3">
+            <MapPin className="h-8 w-8 text-text-muted" />
+          </div>
           <div>
             <p className="font-medium">No trips yet</p>
             <p className="text-sm text-muted-foreground mt-1">

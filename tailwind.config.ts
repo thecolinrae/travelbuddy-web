@@ -15,6 +15,7 @@ const config: Config = {
         primary: {
           DEFAULT: 'rgb(var(--color-primary) / <alpha-value>)',
           dark: 'rgb(var(--color-primary-dark) / <alpha-value>)',
+          foreground: 'rgb(var(--color-primary-foreground) / <alpha-value>)',
         },
         secondary: 'rgb(var(--color-secondary) / <alpha-value>)',
         accent: 'rgb(var(--color-accent) / <alpha-value>)',
@@ -52,6 +53,7 @@ const config: Config = {
       },
       fontFamily: {
         sans: ['var(--font-sans)', 'system-ui', 'sans-serif'],
+        display: ['var(--font-display)', 'Georgia', 'serif'],
       },
     },
   },

@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Download, Loader2, FileText, File, Image } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Download, Loader2, Trash2, FileText, File, Image, Mail } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 export interface ArtifactInfo {
@@ -15,6 +16,7 @@ export interface ArtifactInfo {
 function fileIcon(mimeType: string) {
   if (mimeType === 'application/pdf') return <File className="h-4 w-4 text-red-500" />;
   if (mimeType.startsWith('image/')) return <Image className="h-4 w-4 text-blue-500" />;
+  if (mimeType === 'text/html') return <Mail className="h-4 w-4 text-blue-500" />;
   return <FileText className="h-4 w-4 text-muted-foreground" />;
 }
 
@@ -28,10 +30,14 @@ function formatSize(bytes: number | null): string {
 interface Props {
   artifacts: ArtifactInfo[];
   tripId: string;
+  isOwner: boolean;
 }
 
-export function DocumentsTab({ artifacts, tripId }: Props) {
+export function DocumentsTab({ artifacts, tripId, isOwner }: Props) {
+  const router = useRouter();
   const [downloading, setDownloading] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   async function handleDownload(artifact: ArtifactInfo) {
     setDownloading(artifact.id);
@@ -45,6 +51,17 @@ export function DocumentsTab({ artifacts, tripId }: Props) {
       a.click();
     } finally {
       setDownloading(null);
+    }
+  }
+
+  async function handleDelete(artifact: ArtifactInfo) {
+    setDeleting(artifact.id);
+    try {
+      await fetch(`/api/artifacts/${artifact.id}`, { method: 'DELETE' });
+      router.refresh();
+    } finally {
+      setDeleting(null);
+      setConfirmDelete(null);
     }
   }
 
@@ -78,6 +95,7 @@ export function DocumentsTab({ artifacts, tripId }: Props) {
                 })}
               </p>
             </div>
+
             <Button
               variant="ghost"
               size="sm"
@@ -91,6 +109,34 @@ export function DocumentsTab({ artifacts, tripId }: Props) {
                 <Download className="h-4 w-4" />
               )}
             </Button>
+
+            {isOwner && confirmDelete !== a.id && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setConfirmDelete(a.id)}
+                disabled={deleting === a.id}
+                className="shrink-0 text-muted-foreground hover:text-destructive"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            )}
+
+            {isOwner && confirmDelete === a.id && (
+              <div className="flex gap-1 shrink-0">
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => handleDelete(a)}
+                  disabled={deleting === a.id}
+                >
+                  {deleting === a.id ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Delete'}
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(null)}>
+                  Cancel
+                </Button>
+              </div>
+            )}
           </li>
         ))}
       </ul>

@@ -22,9 +22,9 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
-function getS3Client(): S3Client {
+function getS3Client(endpoint?: string): S3Client {
   return new S3Client({
-    endpoint: process.env.S3_ENDPOINT,
+    endpoint: endpoint ?? process.env.S3_ENDPOINT,
     region: process.env.S3_REGION ?? 'us-east-1',
     credentials: {
       accessKeyId: process.env.S3_ACCESS_KEY!,
@@ -87,9 +87,18 @@ export async function uploadArtifact(
 /**
  * Generate a presigned URL for temporary read access (1 hour expiry).
  * Use this to serve artifact downloads to the browser.
+ *
+ * In Docker dev the S3 client talks to the internal service hostname (e.g.
+ * http://storage:9000) which browsers cannot resolve. Set S3_PUBLIC_ENDPOINT
+ * to the browser-accessible base URL (e.g. http://localhost:9000) and the
+ * presigned URL will be signed against that hostname directly, so the
+ * signature remains valid when the browser sends the request.
  */
 export async function getArtifactUrl(storagePath: string): Promise<string> {
-  const s3 = getS3Client();
+  // Sign against the public endpoint when set — the browser sends the request
+  // to that host, so the signature must be computed with that hostname.
+  const signingEndpoint = process.env.S3_PUBLIC_ENDPOINT ?? process.env.S3_ENDPOINT;
+  const s3 = getS3Client(signingEndpoint);
   return getSignedUrl(
     s3,
     new GetObjectCommand({ Bucket: BUCKET, Key: storagePath }),

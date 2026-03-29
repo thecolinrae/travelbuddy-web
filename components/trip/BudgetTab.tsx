@@ -1,5 +1,10 @@
 'use client';
 
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { Pencil, Check, X } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import type { TimelineEvent, ExpenseEvent, BudgetItemCategory } from '@/types';
 
 const CATEGORIES: BudgetItemCategory[] = [
@@ -22,13 +27,76 @@ function formatCurrency(amount: number, currency: string): string {
 }
 
 interface Props {
+  tripId: string;
   timeline: TimelineEvent[];
   budgetGoal: number | null;
   categoryGoals: Partial<Record<BudgetItemCategory, number>> | null;
   currency: string;
+  isOwner: boolean;
 }
 
-export function BudgetTab({ timeline, budgetGoal, categoryGoals, currency }: Props) {
+function InlineGoalEdit({
+  label,
+  value,
+  currency,
+  onSave,
+}: {
+  label: string;
+  value: number | null;
+  currency: string;
+  onSave: (v: number | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value ? String(value) : '');
+
+  function commit() {
+    const n = draft.trim() ? parseFloat(draft) : null;
+    onSave(isNaN(n!) ? null : n);
+    setEditing(false);
+  }
+
+  function cancel() {
+    setDraft(value ? String(value) : '');
+    setEditing(false);
+  }
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-1">
+        <span className="text-sm text-muted-foreground">{label}</span>
+        <Input
+          type="number"
+          min="0"
+          step="1"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          className="h-7 w-28 text-sm px-2"
+          autoFocus
+          onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') cancel(); }}
+        />
+        <button onClick={commit} className="text-primary hover:text-primary/80"><Check className="h-4 w-4" /></button>
+        <button onClick={cancel} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      onClick={() => { setDraft(value ? String(value) : ''); setEditing(true); }}
+      className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground group"
+    >
+      {value ? (
+        <span className="font-medium text-foreground">{formatCurrency(value, currency)}</span>
+      ) : (
+        <span className="text-primary text-xs font-medium">+ Set {label.toLowerCase()}</span>
+      )}
+      <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-60 transition-opacity" />
+    </button>
+  );
+}
+
+export function BudgetTab({ tripId, timeline, budgetGoal, categoryGoals, currency, isOwner }: Props) {
+  const router = useRouter();
   const expenses = timeline.filter((e): e is ExpenseEvent => e.type === 'expense');
 
   const totals: Partial<Record<BudgetItemCategory, number>> = {};
@@ -38,7 +106,18 @@ export function BudgetTab({ timeline, budgetGoal, categoryGoals, currency }: Pro
   }
 
   const totalSpent = Object.values(totals).reduce((a, b) => a + (b ?? 0), 0);
-  const usedCategories = CATEGORIES.filter((c) => (totals[c] ?? 0) > 0);
+
+  async function saveGoals(
+    newBudgetGoal: number | null,
+    newCategoryGoals: Partial<Record<BudgetItemCategory, number>> | null,
+  ) {
+    await fetch(`/api/trips/${tripId}/budget`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ budgetGoal: newBudgetGoal, categoryGoals: newCategoryGoals }),
+    });
+    router.refresh();
+  }
 
   return (
     <div className="space-y-6">
@@ -48,14 +127,25 @@ export function BudgetTab({ timeline, budgetGoal, categoryGoals, currency }: Pro
           <p className="text-sm font-medium text-muted-foreground">Total spent</p>
           <p className="text-2xl font-semibold">{formatCurrency(totalSpent, currency)}</p>
         </div>
+
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-muted-foreground">Budget goal</p>
+          {isOwner ? (
+            <InlineGoalEdit
+              label="Budget goal"
+              value={budgetGoal}
+              currency={currency}
+              onSave={(v) => saveGoals(v, categoryGoals)}
+            />
+          ) : budgetGoal ? (
+            <span className={`text-sm ${totalSpent > budgetGoal ? 'text-destructive font-medium' : ''}`}>
+              {formatCurrency(budgetGoal, currency)}
+            </span>
+          ) : null}
+        </div>
+
         {budgetGoal && (
           <>
-            <div className="flex items-baseline justify-between text-sm">
-              <span className="text-muted-foreground">Budget goal</span>
-              <span className={totalSpent > budgetGoal ? 'text-destructive font-medium' : ''}>
-                {formatCurrency(budgetGoal, currency)}
-              </span>
-            </div>
             <div className="h-2 rounded-full bg-muted overflow-hidden">
               <div
                 className={`h-full rounded-full transition-all ${
@@ -71,14 +161,13 @@ export function BudgetTab({ timeline, budgetGoal, categoryGoals, currency }: Pro
         )}
       </div>
 
-      {/* Categories */}
-      {usedCategories.length > 0 && (
-        <div className="space-y-3">
-          <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
-            By category
-          </h3>
-          <ul className="space-y-2">
-            {usedCategories.map((cat) => {
+      {/* Categories — always shown so goals can be set before any spending */}
+      <div className="space-y-3">
+        <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+          By category
+        </h3>
+        <ul className="space-y-2">
+          {CATEGORIES.map((cat) => {
               const spent = totals[cat] ?? 0;
               const goal = categoryGoals?.[cat];
               const pct = goal ? Math.min((spent / goal) * 100, 100) : null;
@@ -88,31 +177,38 @@ export function BudgetTab({ timeline, budgetGoal, categoryGoals, currency }: Pro
                     <span className="text-sm">{CATEGORY_LABELS[cat]}</span>
                     <span className="text-sm font-medium">{formatCurrency(spent, currency)}</span>
                   </div>
-                  {goal && (
-                    <>
-                      <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                        <div
-                          className={`h-full rounded-full ${pct! >= 100 ? 'bg-destructive' : 'bg-primary'}`}
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
+                  <div className="flex items-center justify-between">
+                    {isOwner ? (
+                      <InlineGoalEdit
+                        label={`${CATEGORY_LABELS[cat]} goal`}
+                        value={goal ?? null}
+                        currency={currency}
+                        onSave={(v) => {
+                          const updated = { ...(categoryGoals ?? {}) };
+                          if (v === null) delete updated[cat];
+                          else updated[cat] = v;
+                          saveGoals(budgetGoal, updated);
+                        }}
+                      />
+                    ) : goal ? (
                       <p className="text-xs text-muted-foreground">
                         of {formatCurrency(goal, currency)} goal
                       </p>
-                    </>
+                    ) : null}
+                  </div>
+                  {goal && (
+                    <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${pct! >= 100 ? 'bg-destructive' : 'bg-primary'}`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
                   )}
                 </li>
               );
             })}
           </ul>
         </div>
-      )}
-
-      {usedCategories.length === 0 && (
-        <div className="py-8 text-center text-muted-foreground text-sm">
-          No expenses found in the timeline.
-        </div>
-      )}
     </div>
   );
 }

@@ -19,7 +19,9 @@ export interface TripRow {
   endDate: string | null;
   status: string;
   coverEmoji: string;
+  coverPhotoUrl: string | null;
   itineraryMd: string | null;
+  notes: string | null;
   budgetGoal: number | null;
   categoryGoals: Partial<Record<BudgetItemCategory, number>> | null;
   preferredCurrency: string;
@@ -37,6 +39,7 @@ export type TripCreateInput = {
   status?: string;
   coverEmoji?: string;
   itineraryMd?: string;
+  notes?: string | null;
   budgetGoal?: number;
   categoryGoals?: Partial<Record<BudgetItemCategory, number>>;
   preferredCurrency?: string;
@@ -79,6 +82,7 @@ export async function updateTrip(
       ...(data.status !== undefined && { status: data.status }),
       ...(data.coverEmoji !== undefined && { coverEmoji: data.coverEmoji }),
       ...(data.itineraryMd !== undefined && { itineraryMd: data.itineraryMd }),
+      ...(data.notes !== undefined && { notes: data.notes }),
       ...(data.budgetGoal !== undefined && { budgetGoal: data.budgetGoal }),
       ...(data.categoryGoals !== undefined && { categoryGoals: data.categoryGoals }),
       ...(data.preferredCurrency !== undefined && { preferredCurrency: data.preferredCurrency }),
@@ -131,6 +135,10 @@ export async function updateBudgetGoals(
       categoryGoals: categoryGoals ?? undefined,
     },
   });
+}
+
+export async function updateTripCoverPhoto(tripId: string, coverPhotoUrl: string): Promise<void> {
+  await prisma.trip.update({ where: { id: tripId }, data: { coverPhotoUrl } });
 }
 
 // ─── Timeline ─────────────────────────────────────────────────────────────────
@@ -216,6 +224,15 @@ export async function listArtifacts(tripId: string): Promise<ArtifactRecord[]> {
     where: { tripId },
     orderBy: { createdAt: 'desc' },
     select: { id: true, fileName: true, mimeType: true, storagePath: true, size: true, createdAt: true },
+  });
+}
+
+export async function getArtifact(
+  id: string,
+): Promise<{ id: string; storagePath: string; tripId: string } | null> {
+  return prisma.artifact.findUnique({
+    where: { id },
+    select: { id: true, storagePath: true, tripId: true },
   });
 }
 

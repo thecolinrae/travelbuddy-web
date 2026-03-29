@@ -30,7 +30,7 @@ export function TripCard({ trip }: Props) {
       href={`/trip/${trip.id}`}
       className="group flex items-start gap-4 rounded-xl border bg-card p-4 transition-shadow hover:shadow-md"
     >
-      <span className="text-3xl leading-none mt-0.5">{trip.coverEmoji}</span>
+      <div className="shrink-0 w-10 h-10 rounded-lg bg-surface" />
       <div className="min-w-0 flex-1">
         <div className="flex items-start justify-between gap-2">
           <p className="font-semibold text-base leading-tight truncate group-hover:text-primary transition-colors">

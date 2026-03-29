@@ -37,7 +37,9 @@ model Trip {
   endDate           String?                     // YYYY-MM-DD
   status            String    @default("upcoming")
   coverEmoji        String    @default("✈️")
+  coverPhotoUrl     String?                     // destination photo URL (Google Places CDN or future: Unsplash)
   itineraryMd       String?                     // AI-generated markdown (display only)
+  notes             String?                     // freeform user notes (markdown)
   budgetGoal        Float?
   categoryGoals     Json?                       // Partial<Record<BudgetItemCategory, number>>
   preferredCurrency String    @default("USD")

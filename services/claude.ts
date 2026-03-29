@@ -186,6 +186,15 @@ Rules:
     Step 2: + 11h = 2024-06-11T16:00Z
     Step 3: NRT JST (UTC+9): 16:00 + 9h = 25:00 → +1 day → arrivalDate=2024-06-12, arrivalTime=01:00
     Step 4: 2024-06-11T16:00Z > 2024-06-11T05:00Z ✓
+  EXAMPLE D — eastbound across the date line, local arrival SAME day as departure (Tokyo → Los Angeles, June):
+    Depart NRT 2025-06-10 11:00 JST (UTC+9)
+    Step 1: 11:00 − 9h = 2025-06-10T02:00Z
+    Step 2: + 9h 30min flight = 2025-06-10T11:30Z
+    Step 3: LAX PDT (UTC−7): 11:30 − 7h = 04:30 → arrivalDate=2025-06-10, arrivalTime=04:30
+    Step 4: 2025-06-10T11:30Z > 2025-06-10T02:00Z ✓
+    Note: local arrival date (June 10) is the SAME as local departure date even though ~9.5 h
+    elapsed. This is normal for eastbound transpacific flights — do NOT add a day to the arrival.
+- EASTBOUND DATE LINE: When flying east across the date line (e.g. Asia/Pacific → Americas), local arrival date is often the same as or only one day after the local departure date. Trust the UTC arithmetic — do not "correct" this by adding a day to the arrival.
 - UTC times: populate departureUtc and arrivalUtc for every leg whenever you know or can reliably infer the airport timezone. Common offsets (account for DST by date): YYZ=UTC−5/−4DST, LHR=UTC+0/+1BST, NRT=UTC+9, SYD=UTC+10/+11AEDT(Oct–Apr), LAX=UTC−8/−7PDT, YVR=UTC−8/−7PDT, CDG=UTC+1/+2CEST, DXB=UTC+4, SIN=UTC+8, HKG=UTC+8. Omit only if truly uncertain.
 - DATE YEAR INFERENCE: When a document states a date without a year (e.g. "Jun 10", "Mon 10 Mar", "March 10th"), infer the year using the current date provided at the top of the request. Do not use any other default year.
 - PASSENGERS (flight artifacts): If the booking lists multiple passengers by name, populate "passengers" as an array with one entry per passenger — each entry having at minimum "name". Include "seatNumber" per passenger if individual seat assignments are shown, and "mealChoice" if meal preferences are listed. For a single-passenger document, omit "passengers" entirely. Set "passengerCount" to the total number of passengers (infer from passengers.length if not explicitly stated; omit if unknown). The top-level "seatNumber" remains the primary/first-passenger seat for backward compatibility.

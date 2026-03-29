@@ -1,10 +1,19 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Plus, Share2 } from 'lucide-react';
+import { ArrowLeft, Plus, Share2, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
 import { ShareModal } from '@/components/trip/ShareModal';
+import { TripEditModal } from '@/components/trip/TripEditModal';
 import { ItineraryTab } from '@/components/trip/ItineraryTab';
 import { TimelineTab } from '@/components/trip/TimelineTab';
 import { FlightsTab } from '@/components/trip/FlightsTab';
@@ -13,6 +22,7 @@ import { ExpensesTab } from '@/components/trip/ExpensesTab';
 import { MapTab } from '@/components/trip/MapTab';
 import { ActivitiesTab } from '@/components/trip/ActivitiesTab';
 import { DocumentsTab } from '@/components/trip/DocumentsTab';
+import { NotesTab } from '@/components/trip/NotesTab';
 import type { ArtifactInfo } from '@/components/trip/DocumentsTab';
 import type { TimelineEvent, Activity, BudgetItemCategory } from '@/types';
 
@@ -25,6 +35,7 @@ const TABS = [
   { id: 'map',         label: 'Map'         },
   { id: 'activities',  label: 'Activities'  },
   { id: 'documents',   label: 'Documents'   },
+  { id: 'notes',       label: 'Notes'       },
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
@@ -39,6 +50,7 @@ interface TripData {
   status: string;
   coverEmoji: string;
   itineraryMd: string | null;
+  notes: string | null;
   budgetGoal: number | null;
   categoryGoals: Partial<Record<BudgetItemCategory, number>> | null;
   preferredCurrency: string;
@@ -63,8 +75,12 @@ function formatDateRange(start: string | null, end: string | null): string {
 }
 
 export function TripDetailClient({ trip, timeline, activities, artifacts, isOwner }: Props) {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabId>('itinerary');
   const [shareOpen, setShareOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const destinations =
     trip.destinations?.length > 1
@@ -76,6 +92,17 @@ export function TripDetailClient({ trip, timeline, activities, artifacts, isOwne
   const flightCount = timeline.filter(
     (e) => e.type === 'flight' && e.subtype === 'departure',
   ).length;
+
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      await fetch(`/api/trips/${trip.id}`, { method: 'DELETE' });
+      router.push('/');
+    } finally {
+      setDeleting(false);
+      setDeleteConfirm(false);
+    }
+  }
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -102,7 +129,13 @@ export function TripDetailClient({ trip, timeline, activities, artifacts, isOwne
                 )}
               </div>
             </div>
-            <div className="flex gap-2 shrink-0">
+            <div className="flex gap-2 shrink-0 flex-wrap justify-end">
+              {isOwner && (
+                <Button size="sm" variant="outline" onClick={() => setEditOpen(true)} className="gap-1.5">
+                  <Pencil className="h-4 w-4" />
+                  Edit
+                </Button>
+              )}
               {isOwner && (
                 <Button size="sm" variant="outline" onClick={() => setShareOpen(true)} className="gap-1.5">
                   <Share2 className="h-4 w-4" />
@@ -115,6 +148,16 @@ export function TripDetailClient({ trip, timeline, activities, artifacts, isOwne
                   Add docs
                 </Link>
               </Button>
+              {isOwner && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setDeleteConfirm(true)}
+                  className="gap-1.5 text-muted-foreground hover:text-destructive"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -152,30 +195,104 @@ export function TripDetailClient({ trip, timeline, activities, artifacts, isOwne
 
       {/* Tab content */}
       <div className="flex-1 max-w-4xl mx-auto w-full px-4 py-6">
-        {activeTab === 'itinerary' && <ItineraryTab itineraryMd={trip.itineraryMd} />}
-        {activeTab === 'timeline' && <TimelineTab timeline={timeline} />}
+        {activeTab === 'itinerary' && (
+          <ItineraryTab
+            tripId={trip.id}
+            itineraryMd={trip.itineraryMd}
+            isOwner={isOwner}
+            activities={activities}
+          />
+        )}
+        {activeTab === 'timeline' && (
+          <TimelineTab
+            tripId={trip.id}
+            timeline={timeline}
+            isOwner={isOwner}
+          />
+        )}
         {activeTab === 'flights' && <FlightsTab timeline={timeline} />}
         {activeTab === 'budget' && (
           <BudgetTab
+            tripId={trip.id}
             timeline={timeline}
             budgetGoal={trip.budgetGoal}
             categoryGoals={trip.categoryGoals}
             currency={trip.preferredCurrency}
+            isOwner={isOwner}
           />
         )}
         {activeTab === 'expenses' && (
-          <ExpensesTab timeline={timeline} currency={trip.preferredCurrency} />
+          <ExpensesTab
+            tripId={trip.id}
+            timeline={timeline}
+            currency={trip.preferredCurrency}
+            isOwner={isOwner}
+          />
         )}
         {activeTab === 'map' && <MapTab timeline={timeline} />}
-        {activeTab === 'activities' && <ActivitiesTab activities={activities} />}
+        {activeTab === 'activities' && (
+          <ActivitiesTab
+            tripId={trip.id}
+            destination={trip.destination}
+            activities={activities}
+            isOwner={isOwner}
+          />
+        )}
         {activeTab === 'documents' && (
-          <DocumentsTab artifacts={artifacts} tripId={trip.id} />
+          <DocumentsTab
+            artifacts={artifacts}
+            tripId={trip.id}
+            isOwner={isOwner}
+          />
+        )}
+        {activeTab === 'notes' && (
+          <NotesTab
+            tripId={trip.id}
+            notes={trip.notes}
+            isOwner={isOwner}
+          />
         )}
       </div>
 
+      {/* Modals */}
       {isOwner && (
         <ShareModal tripId={trip.id} open={shareOpen} onClose={() => setShareOpen(false)} />
       )}
+      {isOwner && editOpen && (
+        <TripEditModal
+          tripId={trip.id}
+          open={editOpen}
+          onClose={() => setEditOpen(false)}
+          initial={{
+            name: trip.name,
+            coverEmoji: trip.coverEmoji,
+            destination: trip.destination,
+            startDate: trip.startDate,
+            endDate: trip.endDate,
+          }}
+        />
+      )}
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={deleteConfirm} onOpenChange={(v) => !v && setDeleteConfirm(false)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete trip?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            This will permanently delete <strong>{trip.coverEmoji} {trip.name}</strong> and all its
+            timeline events, expenses, activities, and documents. This cannot be undone.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteConfirm(false)} disabled={deleting}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
+              {deleting ? 'Deleting…' : 'Delete trip'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

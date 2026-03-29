@@ -523,6 +523,17 @@ function extractEvents(
             journeyId,
             connectingFlight: isConnection ? nextDepId : undefined,
           };
+
+          // Sanity-check: arrivalUtc must be strictly after departureUtc.
+          // If Claude's UTC values are missing or inverted (common for eastbound
+          // date-line crossings), recompute both from local time + IANA timezone.
+          const depUtcMs = dep.utcISO ? new Date(dep.utcISO).getTime() : NaN;
+          const arrUtcMs = arr.utcISO ? new Date(arr.utcISO).getTime() : NaN;
+          if (isNaN(depUtcMs) || isNaN(arrUtcMs) || arrUtcMs <= depUtcMs) {
+            dep.utcISO = utcForEvent(dep.date, dep.time, dep.timezone) ?? dep.utcISO;
+            arr.utcISO = utcForEvent(arr.date, arr.time, arr.timezone) ?? arr.utcISO;
+          }
+
           events.push(arr);
         }
       }
@@ -582,6 +593,7 @@ function extractEvents(
         events.push(checkInEvent);
       }
 
+      let checkOutId: string | undefined;
       if (checkOut) {
         const checkOutEvent: HotelCheckOutEvent = {
           id: nanoid(),
@@ -597,27 +609,31 @@ function extractEvents(
           bookingRef: artifact.confirmationNumber,
           artifactSources: src ? [src] : undefined,
         };
+        checkOutId = checkOutEvent.id;
         events.push(checkOutEvent);
       }
 
-      // ExpenseEvent at check-in time (so daily spend shows on arrival day, not departure day)
+      // Hotel expense linked to check-out (guest settles the bill on departure)
+      // Falls back to check-in id when there is no check-out event.
       if (artifact.amount && artifact.amount > 0) {
-        const expDate = checkIn ?? checkOut ?? '';
+        const linkedId = checkOutId ?? checkInId;
+        const linkedDate = checkOut ?? checkIn ?? '';
+        const linkedTime = checkOut ? artifact.checkOutTime : artifact.checkInTime;
         const cost = makeCost(artifact.amount, artifact.currency ?? preferredCurrency, preferredCurrency, rates);
         const expense: ExpenseEvent = {
           id: nanoid(),
           type: 'expense',
-          date: expDate,
-          time: artifact.checkInTime,
+          date: linkedDate,
+          time: linkedTime,
           timezone: tz,
-          utcISO: utcForEvent(expDate, artifact.checkInTime, tz),
+          utcISO: utcForEvent(linkedDate, linkedTime, tz),
           locationCity: city,
           description: hotelName,
           vendor: artifact.vendor,
           category: 'hotels',
           cost,
           notes: artifact.roomType ? `Room: ${artifact.roomType}` : undefined,
-          linkedEventId: checkInId,
+          linkedEventId: linkedId,
           artifactSources: src ? [src] : undefined,
         };
         events.push(expense);

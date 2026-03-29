@@ -2,13 +2,13 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Plane, Upload, Settings } from 'lucide-react';
+import { Plane, MapPin, Upload, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Session } from 'next-auth';
 import Image from 'next/image';
 
 const NAV_ITEMS = [
-  { href: '/', label: 'Trips', icon: Plane },
+  { href: '/', label: 'Trips', icon: MapPin },
   { href: '/import', label: 'Import', icon: Upload },
   { href: '/settings', label: 'Settings', icon: Settings },
 ];
@@ -22,8 +22,8 @@ export function AppNav({ session }: { session: Session }) {
       <aside className="hidden md:flex w-56 flex-col border-r border-border bg-card">
         {/* Logo */}
         <div className="flex items-center gap-2 px-4 py-5 border-b border-border">
-          <div className="rounded-lg bg-primary/10 p-1.5">
-            <Plane className="h-5 w-5 text-primary" />
+          <div className="rounded-lg bg-primary p-1.5">
+            <Plane className="h-5 w-5 text-primary-foreground" />
           </div>
           <span className="font-semibold text-text-base">TravelBuddy</span>
         </div>
@@ -37,7 +37,7 @@ export function AppNav({ session }: { session: Session }) {
               className={cn(
                 'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
                 pathname === href
-                  ? 'bg-primary/10 text-primary'
+                  ? 'border-l-2 border-primary bg-primary/10 text-text-base font-medium pl-[10px]'
                   : 'text-text-muted hover:bg-surface hover:text-text-base',
               )}
             >
@@ -77,7 +77,7 @@ export function AppNav({ session }: { session: Session }) {
             href={href}
             className={cn(
               'flex flex-1 flex-col items-center gap-1 py-3 text-xs font-medium transition-colors',
-              pathname === href ? 'text-primary' : 'text-text-muted',
+              pathname === href ? 'text-primary-dark' : 'text-text-muted',
             )}
           >
             <Icon className="h-5 w-5" />
