@@ -16,7 +16,7 @@
  * lh3.googleusercontent.com is already in next.config.ts remotePatterns.
  */
 export async function fetchDestinationPhoto(destination: string): Promise<string | null> {
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
   if (!apiKey || !destination.trim()) return null;
 
   try {
