@@ -2,8 +2,9 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Plus } from 'lucide-react';
+import { ArrowLeft, Plus, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { ShareModal } from '@/components/trip/ShareModal';
 import { ItineraryTab } from '@/components/trip/ItineraryTab';
 import { TimelineTab } from '@/components/trip/TimelineTab';
 import { FlightsTab } from '@/components/trip/FlightsTab';
@@ -48,6 +49,7 @@ interface Props {
   timeline: TimelineEvent[];
   activities: Activity[];
   artifacts: ArtifactInfo[];
+  isOwner: boolean;
 }
 
 function formatDateRange(start: string | null, end: string | null): string {
@@ -60,8 +62,9 @@ function formatDateRange(start: string | null, end: string | null): string {
   return fmt((start ?? end)!);
 }
 
-export function TripDetailClient({ trip, timeline, activities, artifacts }: Props) {
+export function TripDetailClient({ trip, timeline, activities, artifacts, isOwner }: Props) {
   const [activeTab, setActiveTab] = useState<TabId>('itinerary');
+  const [shareOpen, setShareOpen] = useState(false);
 
   const destinations =
     trip.destinations?.length > 1
@@ -99,12 +102,20 @@ export function TripDetailClient({ trip, timeline, activities, artifacts }: Prop
                 )}
               </div>
             </div>
-            <Button asChild size="sm" variant="outline" className="shrink-0">
-              <Link href={`/import?tripId=${trip.id}`} className="gap-1.5">
-                <Plus className="h-4 w-4" />
-                Add docs
-              </Link>
-            </Button>
+            <div className="flex gap-2 shrink-0">
+              {isOwner && (
+                <Button size="sm" variant="outline" onClick={() => setShareOpen(true)} className="gap-1.5">
+                  <Share2 className="h-4 w-4" />
+                  Share
+                </Button>
+              )}
+              <Button asChild size="sm" variant="outline" className="gap-1.5">
+                <Link href={`/import?tripId=${trip.id}`} className="gap-1.5">
+                  <Plus className="h-4 w-4" />
+                  Add docs
+                </Link>
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -161,6 +172,10 @@ export function TripDetailClient({ trip, timeline, activities, artifacts }: Prop
           <DocumentsTab artifacts={artifacts} tripId={trip.id} />
         )}
       </div>
+
+      {isOwner && (
+        <ShareModal tripId={trip.id} open={shareOpen} onClose={() => setShareOpen(false)} />
+      )}
     </div>
   );
 }

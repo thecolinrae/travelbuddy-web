@@ -1,6 +1,7 @@
 import NextAuth from 'next-auth';
 import Google from 'next-auth/providers/google';
 import { prisma } from '@/lib/prisma';
+import { activatePendingShares } from '@/services/db';
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
@@ -45,6 +46,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             avatarUrl: (profile?.image as string) ?? null,
           },
         });
+
+        // Link any pending trip shares for this email
+        if (profile?.email) {
+          await activatePendingShares(
+            account.providerAccountId,
+            profile.email as string,
+          );
+        }
       }
 
       // Return token unchanged if not yet expired (60s buffer)

@@ -49,6 +49,7 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
       timeline={timeline}
       activities={activitiesData?.savedActivities ?? []}
       artifacts={artifactData}
+      isOwner={trip.userId === userId}
     />
   );
 }
