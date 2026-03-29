@@ -144,7 +144,8 @@ export function TimelineTab({ tripId, timeline, isOwner }: Props) {
     linkedExpenses.set(exp.linkedEventId, bucket);
   }
 
-  // Detect orphaned transport legs (have journeyId but missing their counterpart).
+  // Detect orphaned transport legs: events with journeyId missing their counterpart,
+  // and events with no journeyId at all (manually created / corrected events).
   const transportJourneys = new Map<string, { dep?: TransportDepartureEvent; arr?: TransportArrivalEvent }>();
   for (const e of timeline) {
     if (e.type !== 'otherTransportation' || !e.journeyId) continue;
@@ -155,7 +156,9 @@ export function TimelineTab({ tripId, timeline, isOwner }: Props) {
   }
 
   function getMissingCounterpart(e: TimelineEvent): 'arrival' | 'departure' | null {
-    if (e.type !== 'otherTransportation' || !e.journeyId) return null;
+    if (e.type !== 'otherTransportation') return null;
+    // No journeyId → was created/corrected manually without a counterpart
+    if (!e.journeyId) return e.subtype === 'departure' ? 'arrival' : 'departure';
     const j = transportJourneys.get(e.journeyId);
     if (!j) return null;
     if (e.subtype === 'departure' && !j.arr) return 'arrival';
@@ -163,16 +166,30 @@ export function TimelineTab({ tripId, timeline, isOwner }: Props) {
     return null;
   }
 
-  function buildCounterpartPrefill(e: TransportDepartureEvent | TransportArrivalEvent): TransportPrefill {
-    return {
+  async function handleAddCounterpart(e: TransportDepartureEvent | TransportArrivalEvent) {
+    let journeyId = e.journeyId;
+
+    // Assign a journeyId to the existing event if it doesn't have one yet,
+    // so the new counterpart will be linked to it.
+    if (!journeyId) {
+      journeyId = crypto.randomUUID();
+      await fetch(`/api/trips/${tripId}/timeline/${e.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...e, journeyId }),
+      });
+      router.refresh();
+    }
+
+    setCounterpartPrefill({
       transportSubtype: e.subtype === 'departure' ? 'arrival' : 'departure',
       depLocation: e.departureLocation,
       arrLocation: e.arrivalLocation,
       transportType: e.transportType,
       vendor: e.vendor,
       bookingRef: (e as TransportDepartureEvent).bookingRef,
-      journeyId: e.journeyId,
-    };
+      journeyId,
+    });
   }
 
   // Group non-expense events by date
@@ -230,9 +247,7 @@ export function TimelineTab({ tripId, timeline, isOwner }: Props) {
                       if (!missing) return null;
                       return (
                         <button
-                          onClick={() => setCounterpartPrefill(
-                            buildCounterpartPrefill(e as TransportDepartureEvent | TransportArrivalEvent)
-                          )}
+                          onClick={() => handleAddCounterpart(e as TransportDepartureEvent | TransportArrivalEvent)}
                           className="mt-1.5 inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 hover:underline"
                         >
                           <Plus className="h-3 w-3" />
