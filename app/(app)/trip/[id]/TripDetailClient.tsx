@@ -18,8 +18,7 @@ import { TripEditModal } from '@/components/trip/TripEditModal';
 import { DayTab } from '@/components/trip/DayTab';
 import { TimelineTab } from '@/components/trip/TimelineTab';
 import { FlightsTab } from '@/components/trip/FlightsTab';
-import { BudgetTab } from '@/components/trip/BudgetTab';
-import { ExpensesTab } from '@/components/trip/ExpensesTab';
+import { SpendTab } from '@/components/trip/SpendTab';
 import { MapTab } from '@/components/trip/MapTab';
 import { ActivitiesTab } from '@/components/trip/ActivitiesTab';
 import { DocumentsTab } from '@/components/trip/DocumentsTab';
@@ -31,8 +30,7 @@ type TabId =
   | 'day'
   | 'timeline'
   | 'flights'
-  | 'budget'
-  | 'expenses'
+  | 'spend'
   | 'map'
   | 'activities'
   | 'documents'
@@ -42,8 +40,7 @@ function buildTabs(status: string) {
   return [
     { id: 'day' as const,         label: status === 'active' ? 'Today' : 'Day' },
     { id: 'flights' as const,     label: 'Flights'     },
-    { id: 'budget' as const,      label: 'Budget'      },
-    { id: 'expenses' as const,    label: 'Expenses'    },
+    { id: 'spend' as const,       label: 'Spend'       },
     { id: 'map' as const,         label: 'Map'         },
     { id: 'activities' as const,  label: 'Activities'  },
     { id: 'documents' as const,   label: 'Documents'   },
@@ -267,20 +264,12 @@ export function TripDetailClient({ trip, timeline, activities, artifacts, isOwne
           </div>
         )}
         {activeTab === 'flights' && <FlightsTab timeline={timeline} />}
-        {activeTab === 'budget' && (
-          <BudgetTab
+        {activeTab === 'spend' && (
+          <SpendTab
             tripId={trip.id}
             timeline={timeline}
             budgetGoal={trip.budgetGoal}
             categoryGoals={trip.categoryGoals}
-            currency={trip.preferredCurrency}
-            isOwner={isOwner}
-          />
-        )}
-        {activeTab === 'expenses' && (
-          <ExpensesTab
-            tripId={trip.id}
-            timeline={timeline}
             currency={trip.preferredCurrency}
             isOwner={isOwner}
           />
