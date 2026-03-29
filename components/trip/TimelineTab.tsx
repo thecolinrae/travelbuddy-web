@@ -2,19 +2,45 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, Pencil, Trash2, Loader2, CalendarDays } from 'lucide-react';
+import {
+  Plus, Pencil, Trash2, Loader2, CalendarDays,
+  PlaneTakeoff, PlaneLanding, GitMerge,
+  BedDouble, LogOut,
+  Bus, Train, Ship, Car, Navigation,
+  Receipt, Compass,
+} from 'lucide-react';
 import { fmt12 } from '@/components/trip/day/utils';
 import { Button } from '@/components/ui/button';
-import { EventFormModal } from './EventFormModal';
-import type { TimelineEvent, ExpenseEvent } from '@/types';
+import { EventFormModal, type TransportPrefill } from './EventFormModal';
+import type { TimelineEvent, ExpenseEvent, TransportType, TransportDepartureEvent, TransportArrivalEvent } from '@/types';
 
-function eventIcon(e: TimelineEvent): string {
-  if (e.type === 'flight') return e.subtype === 'departure' ? '✈️' : '🛬';
-  if (e.type === 'hotel') return e.subtype === 'check_in' ? '🏨' : '🔑';
-  if (e.type === 'otherTransportation') return e.subtype === 'departure' ? '🚌' : '📍';
-  if (e.type === 'expense') return '💰';
-  if (e.type === 'activity') return '🎭';
-  return '📌';
+const TRANSPORT_ICONS: Record<TransportType, React.ComponentType<{ className?: string }>> = {
+  bus: Bus,
+  train: Train,
+  ferry: Ship,
+  car_rental: Car,
+  taxi: Car,
+  rideshare: Car,
+  other: Navigation,
+};
+
+function EventIcon({ e }: { e: TimelineEvent }) {
+  if (e.type === 'flight') {
+    if (e.subtype === 'departure') return <PlaneTakeoff className="h-4 w-4 text-secondary" />;
+    if (e.subtype === 'arrival') return <PlaneLanding className="h-4 w-4 text-secondary" />;
+    return <GitMerge className="h-4 w-4 text-secondary" />;
+  }
+  if (e.type === 'hotel') {
+    if (e.subtype === 'check_in') return <BedDouble className="h-4 w-4 text-accent" />;
+    return <LogOut className="h-4 w-4 text-accent" />;
+  }
+  if (e.type === 'otherTransportation') {
+    const Icon = TRANSPORT_ICONS[e.transportType] ?? Navigation;
+    return <Icon className="h-4 w-4 text-secondary" />;
+  }
+  if (e.type === 'expense') return <Receipt className="h-4 w-4 text-warning" />;
+  if (e.type === 'activity') return <Compass className="h-4 w-4 text-green-700 dark:text-green-400" />;
+  return <Navigation className="h-4 w-4 text-text-muted" />;
 }
 
 function eventHeadline(e: TimelineEvent): string {
@@ -26,8 +52,10 @@ function eventHeadline(e: TimelineEvent): string {
     return `Check in — ${e.hotelName}`;
   if (e.type === 'hotel' && e.subtype === 'check_out')
     return `Check out — ${e.hotelName}`;
-  if (e.type === 'otherTransportation')
-    return `${e.departureLocation} → ${e.arrivalLocation}`;
+  if (e.type === 'otherTransportation') {
+    if (e.subtype === 'departure') return `${e.departureLocation} → ${e.arrivalLocation}`;
+    return `Arriving at ${e.arrivalLocation}`;
+  }
   if (e.type === 'expense') return e.description;
   if (e.type === 'activity') return e.description;
   return e.locationCity;
@@ -59,6 +87,7 @@ export function TimelineTab({ tripId, timeline, isOwner }: Props) {
   const [editing, setEditing] = useState<TimelineEvent | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [counterpartPrefill, setCounterpartPrefill] = useState<TransportPrefill | null>(null);
 
   async function handleDelete(id: string) {
     setDeleting(id);
@@ -115,6 +144,37 @@ export function TimelineTab({ tripId, timeline, isOwner }: Props) {
     linkedExpenses.set(exp.linkedEventId, bucket);
   }
 
+  // Detect orphaned transport legs (have journeyId but missing their counterpart).
+  const transportJourneys = new Map<string, { dep?: TransportDepartureEvent; arr?: TransportArrivalEvent }>();
+  for (const e of timeline) {
+    if (e.type !== 'otherTransportation' || !e.journeyId) continue;
+    const j = transportJourneys.get(e.journeyId) ?? {};
+    if (e.subtype === 'departure') j.dep = e as TransportDepartureEvent;
+    else j.arr = e as TransportArrivalEvent;
+    transportJourneys.set(e.journeyId, j);
+  }
+
+  function getMissingCounterpart(e: TimelineEvent): 'arrival' | 'departure' | null {
+    if (e.type !== 'otherTransportation' || !e.journeyId) return null;
+    const j = transportJourneys.get(e.journeyId);
+    if (!j) return null;
+    if (e.subtype === 'departure' && !j.arr) return 'arrival';
+    if (e.subtype === 'arrival' && !j.dep) return 'departure';
+    return null;
+  }
+
+  function buildCounterpartPrefill(e: TransportDepartureEvent | TransportArrivalEvent): TransportPrefill {
+    return {
+      transportSubtype: e.subtype === 'departure' ? 'arrival' : 'departure',
+      depLocation: e.departureLocation,
+      arrLocation: e.arrivalLocation,
+      transportType: e.transportType,
+      vendor: e.vendor,
+      bookingRef: (e as TransportDepartureEvent).bookingRef,
+      journeyId: e.journeyId,
+    };
+  }
+
   // Group non-expense events by date
   const byDate = new Map<string, TimelineEvent[]>();
   for (const e of timeline) {
@@ -145,7 +205,7 @@ export function TimelineTab({ tripId, timeline, isOwner }: Props) {
             <ul className="space-y-2">
               {events.map((e) => (
                 <li key={e.id} className="flex items-start gap-3 rounded-lg border bg-card px-4 py-3">
-                  <span className="text-lg leading-none mt-0.5 shrink-0">{eventIcon(e)}</span>
+                  <span className="mt-0.5 shrink-0"><EventIcon e={e} /></span>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium">{eventHeadline(e)}</p>
                     <div className="flex flex-wrap gap-x-3 mt-0.5">
@@ -153,12 +213,11 @@ export function TimelineTab({ tripId, timeline, isOwner }: Props) {
                         <span className="text-xs text-muted-foreground">{fmt12(e.time)}</span>
                       )}
                       {e.locationCity && (
-                        <span className="text-xs text-muted-foreground">📍 {e.locationCity}</span>
+                        <span className="text-xs text-muted-foreground">{e.locationCity}</span>
                       )}
                     </div>
                     {linkedExpenses.get(e.id)?.map((exp) => (
                       <p key={exp.id} className="text-xs text-muted-foreground mt-1">
-                        💰{' '}
                         {new Intl.NumberFormat('en-US', {
                           style: 'currency',
                           currency: exp.cost.preferredCurrency,
@@ -166,6 +225,21 @@ export function TimelineTab({ tripId, timeline, isOwner }: Props) {
                         {exp.description && ` · ${exp.description}`}
                       </p>
                     ))}
+                    {isOwner && (() => {
+                      const missing = getMissingCounterpart(e);
+                      if (!missing) return null;
+                      return (
+                        <button
+                          onClick={() => setCounterpartPrefill(
+                            buildCounterpartPrefill(e as TransportDepartureEvent | TransportArrivalEvent)
+                          )}
+                          className="mt-1.5 inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 hover:underline"
+                        >
+                          <Plus className="h-3 w-3" />
+                          Add missing {missing}
+                        </button>
+                      );
+                    })()}
                   </div>
 
                   {isOwner && (
@@ -230,6 +304,15 @@ export function TimelineTab({ tripId, timeline, isOwner }: Props) {
           onClose={() => setEditing(null)}
           onSaved={() => router.refresh()}
           editing={editing}
+        />
+      )}
+      {counterpartPrefill && (
+        <EventFormModal
+          tripId={tripId}
+          open={!!counterpartPrefill}
+          onClose={() => setCounterpartPrefill(null)}
+          onSaved={() => { router.refresh(); setCounterpartPrefill(null); }}
+          transportPrefill={counterpartPrefill}
         />
       )}
     </div>

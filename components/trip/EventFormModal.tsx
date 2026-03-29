@@ -16,6 +16,7 @@ import {
 import type {
   ActivityEvent,
   TransportDepartureEvent,
+  TransportArrivalEvent,
   FlightDepartureEvent,
   FlightArrivalEvent,
   HotelCheckInEvent,
@@ -32,16 +33,30 @@ type FormType =
   | 'hotelIn'
   | 'hotelOut';
 
+/** Pre-populate a new (non-edit) transport event — used when adding a missing counterpart. */
+export interface TransportPrefill {
+  transportSubtype: 'departure' | 'arrival';
+  depLocation?: string;
+  arrLocation?: string;
+  transportType?: TransportDepartureEvent['transportType'];
+  vendor?: string;
+  bookingRef?: string;
+  journeyId?: string;
+}
+
 interface Props {
   tripId: string;
   open: boolean;
   onClose: () => void;
   onSaved: () => void;
   editing?: TimelineEvent;
+  /** Pre-fills a new transport event (create mode, not edit). */
+  transportPrefill?: TransportPrefill;
 }
 
-export function EventFormModal({ tripId, open, onClose, onSaved, editing }: Props) {
+export function EventFormModal({ tripId, open, onClose, onSaved, editing, transportPrefill }: Props) {
   const detectType = (): FormType => {
+    if (transportPrefill) return 'transport';
     if (!editing) return 'activity';
     if (editing.type === 'activity') return 'activity';
     if (editing.type === 'otherTransportation') return 'transport';
@@ -69,15 +84,18 @@ export function EventFormModal({ tripId, open, onClose, onSaved, editing }: Prop
   const [actBookingRef, setActBookingRef] = useState(act?.bookingRef ?? '');
 
   // ── Transport ─────────────────────────────────────────────────────────────────
-  const tr = editing?.type === 'otherTransportation' ? (editing as TransportDepartureEvent) : null;
-  const [depLocation, setDepLocation] = useState(tr?.departureLocation ?? '');
-  const [arrLocation, setArrLocation] = useState(tr?.arrivalLocation ?? '');
-  const [transportType, setTransportType] = useState<TransportDepartureEvent['transportType']>(
-    tr?.transportType ?? 'other',
+  const tr = editing?.type === 'otherTransportation' ? (editing as TransportDepartureEvent | TransportArrivalEvent) : null;
+  const [transportSubtype, setTransportSubtype] = useState<'departure' | 'arrival'>(
+    transportPrefill?.transportSubtype ?? (tr?.subtype === 'arrival' ? 'arrival' : 'departure'),
   );
-  const [vendor, setVendor] = useState(tr?.vendor ?? '');
-  const [trBookingRef, setTrBookingRef] = useState(tr?.bookingRef ?? '');
-  const [trNotes, setTrNotes] = useState(tr?.notes ?? '');
+  const [depLocation, setDepLocation] = useState(transportPrefill?.depLocation ?? tr?.departureLocation ?? '');
+  const [arrLocation, setArrLocation] = useState(transportPrefill?.arrLocation ?? tr?.arrivalLocation ?? '');
+  const [transportType, setTransportType] = useState<TransportDepartureEvent['transportType']>(
+    transportPrefill?.transportType ?? tr?.transportType ?? 'other',
+  );
+  const [vendor, setVendor] = useState(transportPrefill?.vendor ?? tr?.vendor ?? '');
+  const [trBookingRef, setTrBookingRef] = useState(transportPrefill?.bookingRef ?? (tr as TransportDepartureEvent | null)?.bookingRef ?? '');
+  const [trNotes, setTrNotes] = useState((tr as TransportDepartureEvent | null)?.notes ?? '');
 
   // ── Flight (shared departure + arrival fields) ────────────────────────────────
   const fd =
@@ -128,7 +146,11 @@ export function EventFormModal({ tripId, open, onClose, onSaved, editing }: Prop
   // Spread editing first so non-form fields (journeyId, utcISO, artifactSources, etc.)
   // are preserved exactly as-is.
   function buildEvent(): Omit<TimelineEvent, 'id'> {
-    const base = editing ? { ...editing } : {};
+    const base = editing
+      ? { ...editing }
+      : transportPrefill?.journeyId
+        ? { journeyId: transportPrefill.journeyId }
+        : {};
     const common = { date, time: time || undefined, locationCity };
 
     if (formType === 'flightDep') {
@@ -192,6 +214,20 @@ export function EventFormModal({ tripId, open, onClose, onSaved, editing }: Prop
     }
 
     if (formType === 'transport') {
+      if (transportSubtype === 'arrival') {
+        return {
+          ...base,
+          ...common,
+          type: 'otherTransportation',
+          subtype: 'arrival',
+          transportType,
+          departureLocation: depLocation.trim(),
+          arrivalLocation: arrLocation.trim(),
+          locationCity: arrLocation.trim(),
+          vendor: vendor.trim() || undefined,
+          bookingRef: trBookingRef.trim() || undefined,
+        } as Omit<TransportArrivalEvent, 'id'>;
+      }
       return {
         ...base,
         ...common,
@@ -261,7 +297,7 @@ export function EventFormModal({ tripId, open, onClose, onSaved, editing }: Prop
     if (formType === 'flightArr') return 'Edit flight arrival';
     if (formType === 'hotelIn') return 'Edit hotel check-in';
     if (formType === 'hotelOut') return 'Edit hotel check-out';
-    if (formType === 'transport') return 'Edit transport';
+    if (formType === 'transport') return editing ? 'Edit transport' : `Add transport ${transportSubtype}`;
     return 'Edit event';
   }
 
@@ -420,6 +456,27 @@ export function EventFormModal({ tripId, open, onClose, onSaved, editing }: Prop
           {/* ── Transport ────────────────────────────────────────────────────── */}
           {formType === 'transport' && (
             <>
+              {/* Subtype toggle */}
+              <div className="space-y-1.5">
+                <Label>Leg type</Label>
+                <div className="flex gap-2">
+                  {(['departure', 'arrival'] as const).map((sub) => (
+                    <button
+                      key={sub}
+                      type="button"
+                      onClick={() => setTransportSubtype(sub)}
+                      className={[
+                        'flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors capitalize',
+                        transportSubtype === sub
+                          ? 'border-primary bg-primary/5 text-primary'
+                          : 'border-border text-muted-foreground hover:border-muted-foreground/40',
+                      ].join(' ')}
+                    >
+                      {sub}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="flex gap-3">
                 <div className="space-y-1.5 flex-1">
                   <Label htmlFor="ev-dep">From</Label>

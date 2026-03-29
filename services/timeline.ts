@@ -646,6 +646,7 @@ function extractEvents(
       const dropoffCity = stripAirportCode(artifact.destination ?? artifact.origin ?? '') || '';
       const pickupTz = resolveTimezone(pickupCity) ?? undefined;
       const dropoffTz = resolveTimezone(dropoffCity || pickupCity) ?? undefined;
+      const carJourneyId = nanoid();
 
       let pickupId: string | undefined;
       if (artifact.startDate) {
@@ -658,6 +659,7 @@ function extractEvents(
           timezone: pickupTz,
           utcISO: utcForEvent(artifact.startDate, artifact.startTime, pickupTz),
           locationCity: pickupCity,
+          journeyId: carJourneyId,
           transportType: 'car_rental',
           departureLocation: artifact.origin ?? pickupCity,
           arrivalLocation: artifact.destination ?? dropoffCity,
@@ -680,6 +682,7 @@ function extractEvents(
           timezone: dropoffTz,
           utcISO: utcForEvent(artifact.endDate, artifact.endTime, dropoffTz),
           locationCity: dropoffCity || pickupCity,
+          journeyId: carJourneyId,
           transportType: 'car_rental',
           departureLocation: artifact.origin ?? pickupCity,
           arrivalLocation: artifact.destination ?? dropoffCity,

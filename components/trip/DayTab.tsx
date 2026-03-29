@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { CalendarDays, Route, UtensilsCrossed } from 'lucide-react';
+import { CalendarDays, Route, UtensilsCrossed, List } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DayNav } from './day/DayNav';
 import { NowIndicator } from './day/NowIndicator';
@@ -27,6 +27,7 @@ interface DayTabProps {
   trip: TripSnapshot;
   timeline: TimelineEvent[];
   activities: Activity[];
+  onViewTimeline?: () => void;
 }
 
 function getToday(): string {
@@ -108,7 +109,7 @@ function renderItem(item: DayItem, isPast: boolean, isFirstFuture: boolean, nowT
   return <div className={wrapperClass}>{card}</div>;
 }
 
-export function DayTab({ trip, timeline, activities }: DayTabProps) {
+export function DayTab({ trip, timeline, activities, onViewTimeline }: DayTabProps) {
   const days = buildDayRange(trip.startDate, trip.endDate, timeline, activities);
 
   const [currentIndex, setCurrentIndex] = useState<number>(() => {
@@ -185,6 +186,16 @@ export function DayTab({ trip, timeline, activities }: DayTabProps) {
           })
         )}
       </div>
+
+      {onViewTimeline && (
+        <button
+          onClick={onViewTimeline}
+          className="flex items-center gap-1.5 text-sm text-text-muted hover:text-text-base transition-colors w-full justify-center py-1"
+        >
+          <List className="h-4 w-4" />
+          View all events
+        </button>
+      )}
 
       <PlanThisDayStub />
     </div>

@@ -41,7 +41,6 @@ type TabId =
 function buildTabs(status: string) {
   return [
     { id: 'day' as const,         label: status === 'active' ? 'Today' : 'Day' },
-    { id: 'timeline' as const,    label: 'Timeline'    },
     { id: 'flights' as const,     label: 'Flights'     },
     { id: 'budget' as const,      label: 'Budget'      },
     { id: 'expenses' as const,    label: 'Expenses'    },
@@ -244,14 +243,28 @@ export function TripDetailClient({ trip, timeline, activities, artifacts, isOwne
       {/* Tab content */}
       <div className="flex-1 max-w-4xl mx-auto w-full px-4 py-6">
         {activeTab === 'day' && (
-          <DayTab trip={trip} timeline={timeline} activities={activities} />
+          <DayTab
+            trip={trip}
+            timeline={timeline}
+            activities={activities}
+            onViewTimeline={() => setActiveTab('timeline')}
+          />
         )}
         {activeTab === 'timeline' && (
-          <TimelineTab
-            tripId={trip.id}
-            timeline={timeline}
-            isOwner={isOwner}
-          />
+          <div className="space-y-4">
+            <button
+              onClick={() => setActiveTab('day')}
+              className="flex items-center gap-1.5 text-sm text-text-muted hover:text-text-base transition-colors"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back to {trip.status === 'active' ? 'Today' : 'Day'}
+            </button>
+            <TimelineTab
+              tripId={trip.id}
+              timeline={timeline}
+              isOwner={isOwner}
+            />
+          </div>
         )}
         {activeTab === 'flights' && <FlightsTab timeline={timeline} />}
         {activeTab === 'budget' && (
