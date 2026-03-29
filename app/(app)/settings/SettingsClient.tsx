@@ -5,6 +5,7 @@ import { useTheme } from 'next-themes';
 import { Monitor, Sun, Moon, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { Label } from '@/components/ui/label';
+import { Select } from '@/components/ui/select';
 import { COMMON_CURRENCIES } from '@/services/currency';
 
 interface Props {
@@ -106,19 +107,18 @@ export function SettingsClient({ name, email, avatarUrl, preferredCurrency: init
         </h2>
         <div className="space-y-1.5">
           <Label htmlFor="currency-pref">Default currency</Label>
-          <select
+          <Select
             id="currency-pref"
             value={currency}
             onChange={(e) => handleCurrencyChange(e.target.value)}
             disabled={saving}
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
           >
             {COMMON_CURRENCIES.map((c) => (
               <option key={c.code} value={c.code}>
                 {c.code} — {c.name}
               </option>
             ))}
-          </select>
+          </Select>
           <p className="text-xs text-muted-foreground">
             Used as the default for new trip imports.
           </p>

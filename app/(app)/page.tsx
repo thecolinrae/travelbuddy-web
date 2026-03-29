@@ -21,7 +21,7 @@ export default async function TripsPage() {
   return (
     <main className="max-w-2xl mx-auto px-4 py-8 space-y-8">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">My Trips</h1>
+        <h1 className="type-heading">My Trips</h1>
         <Button asChild size="sm">
           <Link href="/import" className="gap-1.5">
             <Plus className="h-4 w-4" />
@@ -31,18 +31,18 @@ export default async function TripsPage() {
       </div>
 
       {trips.length === 0 && (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-16 gap-4 text-center">
-          <div className="rounded-full bg-surface p-3">
-            <MapPin className="h-8 w-8 text-text-muted" />
+        <div className="py-20 flex flex-col items-center gap-5 text-center">
+          <div className="rounded-full bg-primary/10 p-5 border-2 border-primary/20">
+            <MapPin className="h-10 w-10 text-primary-dark" />
           </div>
-          <div>
-            <p className="font-medium">No trips yet</p>
-            <p className="text-sm text-muted-foreground mt-1">
-              Import your booking confirmations to get started.
+          <div className="space-y-2 max-w-sm">
+            <h2 className="font-display font-semibold text-xl">No trips yet</h2>
+            <p className="type-body text-text-muted">
+              Import a confirmation email, itinerary PDF, or booking document to create your first trip.
             </p>
           </div>
-          <Button asChild>
-            <Link href="/import">Import documents</Link>
+          <Button asChild className="bg-primary text-primary-foreground hover:bg-primary-dark font-semibold">
+            <Link href="/import">Import your first trip</Link>
           </Button>
         </div>
       )}

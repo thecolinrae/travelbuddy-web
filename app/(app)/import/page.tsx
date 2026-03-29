@@ -12,6 +12,7 @@ import { TextPasteModal } from '@/components/import/TextPasteModal';
 import { GmailPickerPanel } from '@/components/import/GmailPickerPanel';
 import { ImportProgress } from '@/components/import/ImportProgress';
 import { COMMON_CURRENCIES } from '@/services/currency';
+import { Select } from '@/components/ui/select';
 import type { GmailMessage } from '@/services/gmail';
 import type { TripRow } from '@/services/db';
 import { nanoid } from '@/services/nanoid';
@@ -176,9 +177,9 @@ export default function ImportPage() {
     <>
       <main className="max-w-2xl mx-auto px-4 py-8 space-y-8">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Import trip documents</h1>
-          <p className="text-muted-foreground mt-1">
-            Upload confirmations, paste emails, or pull directly from Gmail.
+          <h1 className="type-heading">Import documents</h1>
+          <p className="type-body text-text-muted mt-1">
+            Add flights, hotels, and activities to a trip.
           </p>
         </div>
 
@@ -241,35 +242,33 @@ export default function ImportPage() {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label htmlFor="currency">Currency</Label>
-              <select
+              <Select
                 id="currency"
                 value={currency}
                 onChange={(e) => setCurrency(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               >
                 {COMMON_CURRENCIES.map((c) => (
                   <option key={c.code} value={c.code}>
                     {c.code} — {c.name}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
 
             <div className="space-y-1.5">
               <Label htmlFor="trip-mode">Add to</Label>
-              <select
+              <Select
                 id="trip-mode"
                 value={tripMode}
                 onChange={(e) => setTripMode(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               >
-                <option value="new">✨ New trip</option>
+                <option value="new">New trip</option>
                 {existingTrips.map((t) => (
                   <option key={t.id} value={t.id}>
-                    {t.coverEmoji} {t.name}
+                    {t.name}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
           </div>
         </section>

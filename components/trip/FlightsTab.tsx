@@ -1,13 +1,10 @@
 'use client';
 
 import type { FlightDepartureEvent, FlightArrivalEvent, TimelineEvent } from '@/types';
+import { fmt12 as fmt12Base } from '@/components/trip/day/utils';
 
 function fmt12(time?: string): string {
-  if (!time) return '—';
-  const [hStr, mStr] = time.split(':');
-  const h = parseInt(hStr, 10);
-  const m = mStr ?? '00';
-  return `${h % 12 === 0 ? 12 : h % 12}:${m} ${h >= 12 ? 'PM' : 'AM'}`;
+  return fmt12Base(time) || '—';
 }
 
 function formatDate(d: string): string {

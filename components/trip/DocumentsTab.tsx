@@ -67,8 +67,14 @@ export function DocumentsTab({ artifacts, tripId, isOwner }: Props) {
 
   if (artifacts.length === 0) {
     return (
-      <div className="py-12 text-center text-muted-foreground text-sm">
-        No documents attached to this trip.
+      <div className="py-16 flex flex-col items-center gap-4 text-center">
+        <div className="rounded-full bg-surface p-4">
+          <FileText className="h-8 w-8 text-text-muted" />
+        </div>
+        <div className="space-y-1">
+          <p className="font-semibold text-text-base">No documents attached</p>
+          <p className="type-caption max-w-xs">Upload booking confirmations or email exports to attach them here.</p>
+        </div>
       </div>
     );
   }

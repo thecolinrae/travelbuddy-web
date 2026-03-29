@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import {
   Dialog,
@@ -264,8 +265,6 @@ export function EventFormModal({ tripId, open, onClose, onSaved, editing }: Prop
     return 'Edit event';
   }
 
-  const selectCls =
-    'w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring';
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
@@ -308,20 +307,19 @@ export function EventFormModal({ tripId, open, onClose, onSaved, editing }: Prop
             // Edit mode: dropdown covering all six editable types
             <div className="space-y-1.5">
               <Label htmlFor="ev-type">Event type</Label>
-              <select
+              <Select
                 id="ev-type"
                 value={formType}
                 onChange={(e) => setFormType(e.target.value as FormType)}
-                className={selectCls}
               >
-                <option value="flightDep">✈️ Flight departure</option>
-                <option value="flightArr">🛬 Flight arrival</option>
-                <option value="hotelIn">🏨 Hotel check-in</option>
-                <option value="hotelOut">🔑 Hotel check-out</option>
-                <option value="transport">🚌 Transport</option>
-                <option value="activity">🎭 Activity</option>
-                <option value="other">📌 Other</option>
-              </select>
+                <option value="flightDep">Flight departure</option>
+                <option value="flightArr">Flight arrival</option>
+                <option value="hotelIn">Hotel check-in</option>
+                <option value="hotelOut">Hotel check-out</option>
+                <option value="transport">Transport</option>
+                <option value="activity">Activity</option>
+                <option value="other">Other</option>
+              </Select>
             </div>
           )}
 
@@ -372,21 +370,20 @@ export function EventFormModal({ tripId, open, onClose, onSaved, editing }: Prop
                 {formType === 'activity' && (
                   <div className="space-y-1.5 flex-1">
                     <Label htmlFor="ev-cat">Category</Label>
-                    <select
+                    <Select
                       id="ev-cat"
                       value={actCategory}
                       onChange={(e) => setActCategory(e.target.value)}
-                      className={selectCls}
                     >
-                      <option value="sightseeing">🏛 Sightseeing</option>
-                      <option value="food">🍽 Food</option>
-                      <option value="adventure">🧗 Adventure</option>
-                      <option value="culture">🎭 Culture</option>
-                      <option value="shopping">🛍 Shopping</option>
-                      <option value="nightlife">🌙 Nightlife</option>
-                      <option value="nature">🌿 Nature</option>
-                      <option value="wellness">🧘 Wellness</option>
-                    </select>
+                      <option value="sightseeing">Sightseeing</option>
+                      <option value="food">Food</option>
+                      <option value="adventure">Adventure</option>
+                      <option value="culture">Culture</option>
+                      <option value="shopping">Shopping</option>
+                      <option value="nightlife">Nightlife</option>
+                      <option value="nature">Nature</option>
+                      <option value="wellness">Wellness</option>
+                    </Select>
                   </div>
                 )}
               </div>
@@ -446,22 +443,21 @@ export function EventFormModal({ tripId, open, onClose, onSaved, editing }: Prop
               <div className="flex gap-3">
                 <div className="space-y-1.5 flex-1">
                   <Label htmlFor="ev-ttype">Type</Label>
-                  <select
+                  <Select
                     id="ev-ttype"
                     value={transportType}
                     onChange={(e) =>
                       setTransportType(e.target.value as TransportDepartureEvent['transportType'])
                     }
-                    className={selectCls}
                   >
-                    <option value="bus">🚌 Bus</option>
-                    <option value="train">🚂 Train</option>
-                    <option value="ferry">⛴ Ferry</option>
-                    <option value="car_rental">🚗 Car rental</option>
-                    <option value="taxi">🚕 Taxi</option>
-                    <option value="rideshare">🚙 Rideshare</option>
-                    <option value="other">📦 Other</option>
-                  </select>
+                    <option value="bus">Bus</option>
+                    <option value="train">Train</option>
+                    <option value="ferry">Ferry</option>
+                    <option value="car_rental">Car rental</option>
+                    <option value="taxi">Taxi</option>
+                    <option value="rideshare">Rideshare</option>
+                    <option value="other">Other</option>
+                  </Select>
                 </div>
                 <div className="space-y-1.5 flex-1">
                   <Label htmlFor="ev-vendor">Vendor (optional)</Label>
@@ -604,18 +600,17 @@ export function EventFormModal({ tripId, open, onClose, onSaved, editing }: Prop
                     </div>
                     <div className="space-y-1.5 flex-1">
                       <Label htmlFor="ev-class">Travel class</Label>
-                      <select
+                      <Select
                         id="ev-class"
                         value={travelClass}
                         onChange={(e) => setTravelClass(e.target.value)}
-                        className={selectCls}
                       >
                         <option value="">Not specified</option>
                         <option value="Economy">Economy</option>
                         <option value="Premium Economy">Premium Economy</option>
                         <option value="Business">Business</option>
                         <option value="First">First</option>
-                      </select>
+                      </Select>
                     </div>
                   </div>
                   <div className="space-y-1.5">

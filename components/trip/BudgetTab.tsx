@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Pencil, Check, X } from 'lucide-react';
+import { Pencil, Check, X, Receipt } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { TimelineEvent, ExpenseEvent, BudgetItemCategory } from '@/types';
@@ -12,14 +12,14 @@ const CATEGORIES: BudgetItemCategory[] = [
 ];
 
 const CATEGORY_LABELS: Record<BudgetItemCategory, string> = {
-  flights: '✈️ Flights',
-  hotels: '🏨 Hotels',
-  car_rental: '🚗 Car rental',
-  activities: '🎭 Activities',
-  transport: '🚌 Transport',
-  food: '🍽 Food & drink',
-  insurance: '🛡 Insurance',
-  other: '📦 Other',
+  flights: 'Flights',
+  hotels: 'Hotels',
+  car_rental: 'Car rental',
+  activities: 'Activities',
+  transport: 'Transport',
+  food: 'Food & drink',
+  insurance: 'Insurance',
+  other: 'Other',
 };
 
 function formatCurrency(amount: number, currency: string): string {
@@ -160,6 +160,19 @@ export function BudgetTab({ tripId, timeline, budgetGoal, categoryGoals, currenc
           </>
         )}
       </div>
+
+      {/* Empty state */}
+      {expenses.length === 0 && (
+        <div className="py-10 flex flex-col items-center gap-4 text-center">
+          <div className="rounded-full bg-surface p-4">
+            <Receipt className="h-8 w-8 text-text-muted" />
+          </div>
+          <div className="space-y-1">
+            <p className="font-semibold text-text-base">No expenses tracked</p>
+            <p className="type-caption max-w-xs">Import booking documents or add expenses in the Expenses tab to start tracking spend.</p>
+          </div>
+        </div>
+      )}
 
       {/* Categories — always shown so goals can be set before any spending */}
       <div className="space-y-3">

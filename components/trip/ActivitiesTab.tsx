@@ -2,10 +2,11 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2, Trash2, Pencil, Sparkles, Clock, DollarSign, CalendarDays } from 'lucide-react';
+import { Loader2, Trash2, Pencil, Sparkles, Clock, DollarSign, CalendarDays, Compass } from 'lucide-react';
 import { TripIcon } from '@/components/TripIcon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import {
   Dialog,
@@ -58,16 +59,15 @@ function ActivityEditModal({ activity, onSave, onClose }: EditModalProps) {
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="act-type">Type</Label>
-            <select
+            <Select
               id="act-type"
               value={type}
               onChange={(e) => setType(e.target.value as ActivityType)}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             >
               {(['sightseeing', 'food', 'adventure', 'culture', 'shopping', 'nightlife', 'nature', 'wellness'] as ActivityType[]).map((v) => (
                 <option key={v} value={v}>{v.charAt(0).toUpperCase() + v.slice(1)}</option>
               ))}
-            </select>
+            </Select>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="act-desc">Description</Label>
@@ -188,9 +188,17 @@ export function ActivitiesTab({ tripId, destination, activities, isOwner }: Prop
 
       {/* Saved activities */}
       {saved.length === 0 && (
-        <div className="py-12 text-center text-muted-foreground text-sm">
-          No activities yet — recommendations are generated automatically after import.
-          {isOwner && <p className="mt-2">Or click &ldquo;Refresh recommendations&rdquo; to generate now.</p>}
+        <div className="py-16 flex flex-col items-center gap-4 text-center">
+          <div className="rounded-full bg-surface p-4">
+            <Compass className="h-8 w-8 text-text-muted" />
+          </div>
+          <div className="space-y-1">
+            <p className="font-semibold text-text-base">No activities yet</p>
+            <p className="type-caption max-w-xs">
+              Recommendations are generated automatically after import.
+              {isOwner && ' Or use "Refresh recommendations" to generate now.'}
+            </p>
+          </div>
         </div>
       )}
 

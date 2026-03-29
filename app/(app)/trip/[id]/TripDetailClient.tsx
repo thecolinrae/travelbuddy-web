@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import Image from 'next/image';
 import { ArrowLeft, Plus, Share2, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -14,7 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import { ShareModal } from '@/components/trip/ShareModal';
 import { TripEditModal } from '@/components/trip/TripEditModal';
-import { ItineraryTab } from '@/components/trip/ItineraryTab';
+import { DayTab } from '@/components/trip/DayTab';
 import { TimelineTab } from '@/components/trip/TimelineTab';
 import { FlightsTab } from '@/components/trip/FlightsTab';
 import { BudgetTab } from '@/components/trip/BudgetTab';
@@ -26,19 +27,30 @@ import { NotesTab } from '@/components/trip/NotesTab';
 import type { ArtifactInfo } from '@/components/trip/DocumentsTab';
 import type { TimelineEvent, Activity, BudgetItemCategory } from '@/types';
 
-const TABS = [
-  { id: 'itinerary',   label: 'Itinerary'   },
-  { id: 'timeline',    label: 'Timeline'    },
-  { id: 'flights',     label: 'Flights'     },
-  { id: 'budget',      label: 'Budget'      },
-  { id: 'expenses',    label: 'Expenses'    },
-  { id: 'map',         label: 'Map'         },
-  { id: 'activities',  label: 'Activities'  },
-  { id: 'documents',   label: 'Documents'   },
-  { id: 'notes',       label: 'Notes'       },
-] as const;
+type TabId =
+  | 'day'
+  | 'timeline'
+  | 'flights'
+  | 'budget'
+  | 'expenses'
+  | 'map'
+  | 'activities'
+  | 'documents'
+  | 'notes';
 
-type TabId = (typeof TABS)[number]['id'];
+function buildTabs(status: string) {
+  return [
+    { id: 'day' as const,         label: status === 'active' ? 'Today' : 'Day' },
+    { id: 'timeline' as const,    label: 'Timeline'    },
+    { id: 'flights' as const,     label: 'Flights'     },
+    { id: 'budget' as const,      label: 'Budget'      },
+    { id: 'expenses' as const,    label: 'Expenses'    },
+    { id: 'map' as const,         label: 'Map'         },
+    { id: 'activities' as const,  label: 'Activities'  },
+    { id: 'documents' as const,   label: 'Documents'   },
+    { id: 'notes' as const,       label: 'Notes'       },
+  ];
+}
 
 interface TripData {
   id: string;
@@ -49,6 +61,7 @@ interface TripData {
   endDate: string | null;
   status: string;
   coverEmoji: string;
+  coverPhotoUrl: string | null;
   itineraryMd: string | null;
   notes: string | null;
   budgetGoal: number | null;
@@ -76,7 +89,8 @@ function formatDateRange(start: string | null, end: string | null): string {
 
 export function TripDetailClient({ trip, timeline, activities, artifacts, isOwner }: Props) {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<TabId>('itinerary');
+  const TABS = buildTabs(trip.status);
+  const [activeTab, setActiveTab] = useState<TabId>('day');
   const [shareOpen, setShareOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
@@ -106,63 +120,97 @@ export function TripDetailClient({ trip, timeline, activities, artifacts, isOwne
 
   return (
     <div className="flex flex-col min-h-screen">
-      {/* Header */}
-      <div className="border-b bg-card">
-        <div className="max-w-4xl mx-auto px-4 py-5">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex items-start gap-3 min-w-0">
-              <Link
-                href="/"
-                className="text-muted-foreground hover:text-foreground transition-colors mt-1 shrink-0"
-              >
-                <ArrowLeft className="h-5 w-5" />
-              </Link>
-              <div className="min-w-0">
-                <h1 className="text-xl font-semibold tracking-tight flex items-center gap-2 flex-wrap">
-                  <span>{trip.coverEmoji}</span>
-                  <span>{trip.name}</span>
-                </h1>
-                {(destinations || dateRange) && (
-                  <p className="text-sm text-muted-foreground mt-0.5 truncate">
-                    {[destinations, dateRange].filter(Boolean).join(' · ')}
-                  </p>
-                )}
-              </div>
-            </div>
-            <div className="flex gap-2 shrink-0 flex-wrap justify-end">
-              {isOwner && (
-                <Button size="sm" variant="outline" onClick={() => setEditOpen(true)} className="gap-1.5">
-                  <Pencil className="h-4 w-4" />
-                  Edit
-                </Button>
-              )}
-              {isOwner && (
-                <Button size="sm" variant="outline" onClick={() => setShareOpen(true)} className="gap-1.5">
-                  <Share2 className="h-4 w-4" />
-                  Share
-                </Button>
-              )}
-              <Button asChild size="sm" variant="outline" className="gap-1.5">
-                <Link href={`/import?tripId=${trip.id}`} className="gap-1.5">
-                  <Plus className="h-4 w-4" />
-                  Add docs
-                </Link>
-              </Button>
-              {isOwner && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setDeleteConfirm(true)}
-                  className="gap-1.5 text-muted-foreground hover:text-destructive"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              )}
-            </div>
-          </div>
+      {/* Cover photo hero */}
+      <div className="relative h-48">
+        {trip.coverPhotoUrl ? (
+          <Image
+            src={trip.coverPhotoUrl}
+            alt={trip.destination}
+            fill
+            className="object-cover dark:brightness-75"
+            priority
+            sizes="100vw"
+          />
+        ) : (
+          <div className="absolute inset-0 bg-gradient-to-br from-primary/60 to-yellow-600" />
+        )}
+        {/* Gradient scrim for text legibility */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent" />
+
+        {/* Back link — top left */}
+        <div className="absolute top-4 left-4">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-1.5 text-white/90 hover:text-white text-sm font-medium transition-colors drop-shadow"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Trips
+          </Link>
         </div>
 
-        {/* Tab bar */}
+        {/* Action buttons — top right */}
+        <div className="absolute top-4 right-4 flex gap-2">
+          {isOwner && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setEditOpen(true)}
+              className="gap-1.5 text-white/90 hover:text-white hover:bg-white/15 border border-white/20"
+            >
+              <Pencil className="h-4 w-4" />
+              Edit
+            </Button>
+          )}
+          {isOwner && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setShareOpen(true)}
+              className="gap-1.5 text-white/90 hover:text-white hover:bg-white/15 border border-white/20"
+            >
+              <Share2 className="h-4 w-4" />
+              Share
+            </Button>
+          )}
+          <Button
+            asChild
+            size="sm"
+            variant="ghost"
+            className="gap-1.5 text-white/90 hover:text-white hover:bg-white/15 border border-white/20"
+          >
+            <Link href={`/import?tripId=${trip.id}`}>
+              <Plus className="h-4 w-4" />
+              Add docs
+            </Link>
+          </Button>
+          {isOwner && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setDeleteConfirm(true)}
+              className="text-white/70 hover:text-white hover:bg-white/15 border border-white/20"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
+
+        {/* Trip name — bottom left, over photo */}
+        <div className="absolute bottom-0 left-0 right-0 px-6 pb-4">
+          <h1 className="font-display font-bold text-3xl text-white leading-tight drop-shadow-md">
+            {trip.name}
+          </h1>
+          {(destinations || dateRange) && (
+            <p className="text-white/80 text-sm mt-1 drop-shadow">
+              {[destinations, dateRange].filter(Boolean).join(' · ')}
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* Yellow accent bar + tab navigation */}
+      <div className="bg-card border-b sticky top-0 z-10">
+        <div className="h-1 bg-primary" />
         <div className="overflow-x-auto">
           <div className="flex max-w-4xl mx-auto px-4">
             {TABS.map((tab) => (
@@ -172,7 +220,7 @@ export function TripDetailClient({ trip, timeline, activities, artifacts, isOwne
                 className={[
                   'px-3 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors',
                   activeTab === tab.id
-                    ? 'border-primary text-primary'
+                    ? 'border-primary text-text-base'
                     : 'border-transparent text-muted-foreground hover:text-foreground',
                 ].join(' ')}
               >
@@ -195,13 +243,8 @@ export function TripDetailClient({ trip, timeline, activities, artifacts, isOwne
 
       {/* Tab content */}
       <div className="flex-1 max-w-4xl mx-auto w-full px-4 py-6">
-        {activeTab === 'itinerary' && (
-          <ItineraryTab
-            tripId={trip.id}
-            itineraryMd={trip.itineraryMd}
-            isOwner={isOwner}
-            activities={activities}
-          />
+        {activeTab === 'day' && (
+          <DayTab trip={trip} timeline={timeline} activities={activities} />
         )}
         {activeTab === 'timeline' && (
           <TimelineTab
@@ -280,7 +323,7 @@ export function TripDetailClient({ trip, timeline, activities, artifacts, isOwne
             <DialogTitle>Delete trip?</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            This will permanently delete <strong>{trip.coverEmoji} {trip.name}</strong> and all its
+            This will permanently delete <strong>{trip.name}</strong> and all its
             timeline events, expenses, activities, and documents. This cannot be undone.
           </p>
           <DialogFooter>

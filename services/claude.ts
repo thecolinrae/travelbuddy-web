@@ -200,58 +200,6 @@ Rules:
 - PASSENGERS (flight artifacts): If the booking lists multiple passengers by name, populate "passengers" as an array with one entry per passenger — each entry having at minimum "name". Include "seatNumber" per passenger if individual seat assignments are shown, and "mealChoice" if meal preferences are listed. For a single-passenger document, omit "passengers" entirely. Set "passengerCount" to the total number of passengers (infer from passengers.length if not explicitly stated; omit if unknown). The top-level "seatNumber" remains the primary/first-passenger seat for backward compatibility.
 - Omit any other field that is not present in the document. Return only the JSON, no commentary.`;
 
-const ITINERARY_SYSTEM = `You are a travel itinerary compiler. You receive a confirmed trip timeline. Produce a compact, reference-card-style day-by-day itinerary in Markdown.
-
-CRITICAL RULES:
-- NO prices, costs, or monetary amounts anywhere — not even a hint
-- All times in the timeline are LOCAL to their event location. Display exactly as given — never recalculate or convert. Show in 12-hour format (9:05 AM, 11:40 PM).
-- The local dates in the timeline are already correct — trust them unconditionally.
-- Use icons/emoji instead of verbose labels wherever possible
-- Keep each booking to 2–5 lines of tightly packed facts
-- Do NOT add filler, preamble, summaries, or mid-itinerary travel tips
-- Only include what is confirmed in the timeline
-
-FORMAT per day:
-## [Weekday, Month Day, Year]
-
-For each event on that day:
-**[time if known]** [event line]
-[detail lines — 1 icon per line]
-
-EVENT FORMATS (use these patterns, adapting icons as needed):
-
-✈️ Flight:
-**9:05 AM** ✈️ AC856 · SYD → YVR
-🎫 Ref: ABC123 · Air Canada · Economy
-💺 Seat 12A · 🧳 2×23 kg + 10 kg carry-on
-🚪 Gate B12 · ⏰ Boarding 8:30 AM  ← only if known
-🌏 [Any visa/eTA/border requirements if relevant]
-
-🏨 Hotel check-in:
-**3:00 PM** 🏨 Check in — Fairmont Vancouver
-📍 [city/address]  🔑 Ref: XYZ789
-🛏 King Deluxe · 🚭 Non-smoking  ← use 🚭 for no-smoking instead of writing it
-☕ Breakfast included  ← only if confirmed; omit if not
-
-🏨 Hotel check-out:
-**11:00 AM** 🏨 Check out — Fairmont Vancouver
-
-🚗 Car rental:
-**10:00 AM** 🚗 Pickup — Hertz Vancouver Airport
-📋 Ref: DEF456 · Compact · Return [date] [time]
-
-🎭 Activity:
-**2:00 PM** 🎭 [Name] · [location]
-📋 Ref: [if any]
-
-END OF ITINERARY — after covering all days, add exactly one brief section:
-
----
-### 📍 [Destination] — Quick Notes
-Use 3–5 tight bullet points covering: tipping norm, one or two important cultural customs, and any practical travel note specific to the destination. Keep each bullet to one line. No prices.
-
-`;
-
 /**
  * Parse a file from a base64-encoded buffer (PDF or image).
  * The caller reads the file and provides base64 + mimeType.
@@ -314,13 +262,6 @@ function parseJsonResponse(raw: string): Omit<ParseResult, 'generatedItinerary' 
   } catch {
     throw new Error('Failed to parse Claude response as JSON. Response: ' + raw.substring(0, 200));
   }
-}
-
-// ─── Itinerary Generation ─────────────────────────────────────────────────────
-
-export async function generateItinerary(timeline: string): Promise<string> {
-  const prompt = `Generate a travel itinerary from the following confirmed booking timeline:\n\n${timeline}`;
-  return callClaude(ITINERARY_SYSTEM, prompt);
 }
 
 // ─── Activity Suggestions ─────────────────────────────────────────────────────

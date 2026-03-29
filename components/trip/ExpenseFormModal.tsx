@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import {
   Dialog,
@@ -127,16 +128,15 @@ export function ExpenseFormModal({ tripId, currency, open, onClose, onSaved, edi
           <div className="flex gap-3">
             <div className="space-y-1.5 flex-1">
               <Label htmlFor="exp-category">Category</Label>
-              <select
+              <Select
                 id="exp-category"
                 value={category}
                 onChange={(e) => setCategory(e.target.value as BudgetItemCategory)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               >
                 {CATEGORIES.map((c) => (
                   <option key={c.value} value={c.value}>{c.label}</option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div className="space-y-1.5 flex-1">
               <Label htmlFor="exp-date">Date</Label>

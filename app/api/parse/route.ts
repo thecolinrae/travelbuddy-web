@@ -4,14 +4,12 @@ import {
   parseDocumentBuffer,
   parseTextContent,
   parseEmailContent,
-  generateItinerary,
   parseConcurrent,
   CLAUDE_PARSE_CONCURRENCY,
   suggestActivities,
 } from '@/services/claude';
 import {
   buildTimeline,
-  formatTimeline,
   mergeTimelines,
   extractDestinationsFromTimeline,
 } from '@/services/timeline';
@@ -162,9 +160,6 @@ export async function POST(request: Request) {
           }
         }
 
-        send({ type: 'progress', step: 'Generating itinerary…', completed: total, total });
-        const itineraryMd = await generateItinerary(formatTimeline(timeline));
-
         const uniqueDests = [
           ...new Set(
             allDestinations
@@ -194,7 +189,6 @@ export async function POST(request: Request) {
           }
           const mergedDests = [...new Set([...(existing.destinations ?? []), ...uniqueDests])];
           await updateTrip(tripId, userId, {
-            itineraryMd,
             destinations: mergedDests,
             destination: mergedDests[0] ?? existing.destination,
             ...(overallStartDate && { startDate: overallStartDate }),
@@ -210,7 +204,6 @@ export async function POST(request: Request) {
             startDate: overallStartDate || undefined,
             endDate: overallEndDate || undefined,
             status,
-            itineraryMd,
             preferredCurrency: currency,
             ownerEmail: (session as { user?: { email?: string } })?.user?.email ?? undefined,
           });

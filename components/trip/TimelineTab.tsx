@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, Pencil, Trash2, Loader2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, CalendarDays } from 'lucide-react';
+import { fmt12 } from '@/components/trip/day/utils';
 import { Button } from '@/components/ui/button';
 import { EventFormModal } from './EventFormModal';
 import type { TimelineEvent, ExpenseEvent } from '@/types';
@@ -32,15 +33,6 @@ function eventHeadline(e: TimelineEvent): string {
   return e.locationCity;
 }
 
-function fmt12(time?: string): string {
-  if (!time) return '';
-  const [hStr, mStr] = time.split(':');
-  const h = parseInt(hStr, 10);
-  const m = mStr ?? '00';
-  const suffix = h >= 12 ? 'PM' : 'AM';
-  const h12 = h % 12 === 0 ? 12 : h % 12;
-  return `${h12}:${m} ${suffix}`;
-}
 
 function formatDate(dateStr: string): string {
   return new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', {
@@ -89,8 +81,14 @@ export function TimelineTab({ tripId, timeline, isOwner }: Props) {
             </Button>
           </div>
         )}
-        <div className="py-12 text-center text-muted-foreground text-sm">
-          No events in the timeline yet.
+        <div className="py-16 flex flex-col items-center gap-4 text-center">
+          <div className="rounded-full bg-surface p-4">
+            <CalendarDays className="h-8 w-8 text-text-muted" />
+          </div>
+          <div className="space-y-1">
+            <p className="font-semibold text-text-base">No events yet</p>
+            <p className="type-caption max-w-xs">Import a booking document or add events manually to build your timeline.</p>
+          </div>
         </div>
         {addOpen && (
           <EventFormModal

@@ -44,15 +44,34 @@ export function FileUploadZone({ onFiles }: Props) {
         handleFiles(e.dataTransfer.files);
       }}
       className={[
-        'flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-6 py-10 cursor-pointer transition-colors',
+        'flex flex-col items-center justify-center gap-4 rounded-xl border-2 border-dashed px-8 py-12 cursor-pointer transition-colors min-h-48',
         dragging
           ? 'border-primary bg-primary/5'
-          : 'border-border hover:border-primary/50 hover:bg-muted/40',
+          : 'border-border hover:border-primary/60 hover:bg-surface/60',
       ].join(' ')}
     >
-      <Upload className="h-8 w-8 text-muted-foreground" />
-      <p className="text-sm font-medium">Drop files here or click to browse</p>
-      <p className="text-xs text-muted-foreground">PDF, images (JPG, PNG), or text files</p>
+      <div className={[
+        'rounded-full p-4 transition-colors',
+        dragging ? 'bg-primary/15' : 'bg-surface',
+      ].join(' ')}>
+        <Upload className={[
+          'h-8 w-8 transition-colors',
+          dragging ? 'text-primary-dark' : 'text-text-muted',
+        ].join(' ')} />
+      </div>
+      <div className="space-y-1.5 text-center">
+        <p className="type-subheading">Drop your travel documents here</p>
+        <p className="type-body text-text-muted max-w-xs">
+          PDF confirmations, booking emails, itineraries — we&apos;ll parse everything
+        </p>
+      </div>
+      <div className="flex gap-2 flex-wrap justify-center">
+        {['PDF', 'Email', 'Image'].map((fmt) => (
+          <span key={fmt} className="text-xs font-medium px-2.5 py-1 rounded-full bg-surface border border-border text-text-muted">
+            {fmt}
+          </span>
+        ))}
+      </div>
       <input
         ref={inputRef}
         type="file"
