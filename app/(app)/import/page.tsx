@@ -42,7 +42,15 @@ export default function ImportPage() {
   useEffect(() => {
     fetch('/api/trips')
       .then((r) => r.json())
-      .then((data: { trips?: TripRow[] }) => setExistingTrips(data.trips ?? []))
+      .then((data: { trips?: TripRow[] }) => {
+        setExistingTrips(data.trips ?? []);
+        // Pre-select trip from URL param (?tripId=...)
+        const params = new URLSearchParams(window.location.search);
+        const preId = params.get('tripId');
+        if (preId && data.trips?.some((t) => t.id === preId)) {
+          setTripMode(preId);
+        }
+      })
       .catch(() => {});
   }, []);
 
