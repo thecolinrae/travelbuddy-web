@@ -402,26 +402,16 @@ export type ChatStreamEvent =
   | { type: 'tool_call'; id: string; name: string; input: Record<string, unknown> }
   | { type: 'message_stop' };
 
-async function* readLines(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() ?? '';
-    for (const line of lines) yield line;
-  }
-  if (buffer) yield buffer;
-}
-
-export async function* streamTripChat(
+/**
+ * Stream a single Claude turn with tool use support.
+ * Calls onEvent for each event as it arrives. Retries on 429/529.
+ */
+export async function streamTripChat(
   systemPrompt: string,
   messages: AnthropicChatMessage[],
   tools: ChatToolDefinition[],
-): AsyncGenerator<ChatStreamEvent> {
+  onEvent: (event: ChatStreamEvent) => void,
+): Promise<void> {
   const apiKey = getApiKey();
   let attempt = 0;
 
@@ -467,16 +457,20 @@ export async function* streamTripChat(
       { type: 'text' | 'tool_use'; id?: string; name?: string; jsonBuffer: string }
     > = {};
 
-    for await (const line of readLines(res.body)) {
-      if (!line.startsWith('data: ')) continue;
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let lineBuffer = '';
+
+    const processLine = (line: string) => {
+      if (!line.startsWith('data: ')) return;
       const raw = line.slice(6);
-      if (raw === '[DONE]') break;
+      if (raw === '[DONE]') return;
 
       let data: Record<string, unknown>;
       try {
         data = JSON.parse(raw);
       } catch {
-        continue;
+        return;
       }
 
       const eventType = data.type as string;
@@ -494,10 +488,10 @@ export async function* streamTripChat(
         const index = data.index as number;
         const delta = data.delta as { type: string; text?: string; partial_json?: string };
         const state = blockState[index];
-        if (!state) continue;
+        if (!state) return;
 
         if (delta.type === 'text_delta' && delta.text) {
-          yield { type: 'text_delta', text: delta.text };
+          onEvent({ type: 'text_delta', text: delta.text });
         } else if (delta.type === 'input_json_delta' && delta.partial_json) {
           state.jsonBuffer += delta.partial_json;
         }
@@ -511,16 +505,25 @@ export async function* streamTripChat(
           } catch {
             // malformed tool input — skip
           }
-          yield { type: 'tool_call', id: state.id, name: state.name, input };
+          onEvent({ type: 'tool_call', id: state.id, name: state.name, input });
         }
       } else if (eventType === 'message_stop') {
-        yield { type: 'message_stop' };
-        return;
+        onEvent({ type: 'message_stop' });
       } else if (eventType === 'error') {
         const err = data.error as { message?: string };
         throw new Error(`Claude stream error: ${err?.message ?? JSON.stringify(data)}`);
       }
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      lineBuffer += decoder.decode(value, { stream: true });
+      const lines = lineBuffer.split('\n');
+      lineBuffer = lines.pop() ?? '';
+      for (const line of lines) processLine(line);
     }
+    if (lineBuffer) processLine(lineBuffer);
 
     return;
   }

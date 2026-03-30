@@ -266,14 +266,14 @@ export async function POST(
           let assistantText = '';
           const toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }> = [];
 
-          for await (const event of streamTripChat(systemPrompt, anthropicMessages, CHAT_TOOLS)) {
+          await streamTripChat(systemPrompt, anthropicMessages, CHAT_TOOLS, (event) => {
             if (event.type === 'text_delta') {
               send({ type: 'text', content: event.text });
               assistantText += event.text;
             } else if (event.type === 'tool_call') {
               toolCalls.push({ id: event.id, name: event.name, input: event.input });
             }
-          }
+          });
 
           if (toolCalls.length === 0) break;
 
