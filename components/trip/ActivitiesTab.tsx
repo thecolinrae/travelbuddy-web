@@ -138,9 +138,43 @@ export function ActivitiesTab({
   }
 
   async function handleSchedule(activityId: string, date: string, time: string) {
+    const target = activities.find((a) => a.id === activityId);
+    let enrichedFields: Partial<Activity> = {};
+
+    if (target && !target.address) {
+      try {
+        const res = await fetch(`/api/trips/${tripId}/activities/enrich`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: target.name, city: target.city }),
+        });
+        if (res.ok) {
+          const data = await res.json() as {
+            description?: string; type?: string; estimatedCost?: string;
+            duration?: string; bestTime?: string; tips?: string;
+            familyFriendly?: boolean; highlights?: string[];
+            locationAddress?: string; city?: string;
+          };
+          enrichedFields = {
+            description: target.description || data.description,
+            estimatedCost: target.estimatedCost ?? data.estimatedCost,
+            duration: target.duration ?? data.duration,
+            bestTime: target.bestTime ?? data.bestTime,
+            tips: target.tips ?? data.tips,
+            familyFriendly: target.familyFriendly ?? data.familyFriendly,
+            highlights: target.highlights ?? data.highlights,
+            address: data.locationAddress,
+            city: target.city || data.city,
+          };
+        }
+      } catch {
+        // non-fatal — proceed without enrichment
+      }
+    }
+
     const newList = activities.map((a) =>
       a.id === activityId
-        ? { ...a, scheduledDate: date, scheduledTime: time || undefined }
+        ? { ...a, ...enrichedFields, scheduledDate: date, scheduledTime: time || undefined }
         : a,
     );
     await persistActivities(newList);
