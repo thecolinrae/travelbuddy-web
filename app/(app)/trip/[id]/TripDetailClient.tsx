@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -89,6 +89,9 @@ export function TripDetailClient({ trip, timeline, activities: initialActivities
   const TABS = buildTabs(trip.status);
   const [activeTab, setActiveTab] = useState<TabId>('day');
   const [activities, setActivities] = useState(initialActivities);
+
+  // Sync when router.refresh() delivers updated server data (e.g. after ActivitiesTab saves)
+  useEffect(() => { setActivities(initialActivities); }, [initialActivities]);
 
   const days = useMemo(
     () => buildDayRange(trip.startDate, trip.endDate, timeline, activities),
