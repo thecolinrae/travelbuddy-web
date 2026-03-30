@@ -2,8 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2, Trash2, Pencil, Sparkles, Clock, DollarSign, CalendarDays, Compass } from 'lucide-react';
-import { TripIcon } from '@/components/TripIcon';
+import { Loader2, Sparkles, Compass } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
@@ -15,8 +14,19 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
-import type { Activity, ActivityType } from '@/types';
+import { cn } from '@/lib/utils';
+import { QuickAddBar } from './activities/QuickAddBar';
+import { ActivityGroupSection } from './activities/ActivityGroupSection';
+import { ScheduleSheet } from './activities/ScheduleSheet';
+import {
+  groupByCity,
+  groupByType,
+  sortByDate,
+  type SortMode,
+} from './activities/activityUtils';
+import type { Activity, ActivityType, TimelineEvent } from '@/types';
 
+// ─── Edit modal (preserved from previous implementation) ─────────────────────
 
 interface EditModalProps {
   activity: Activity;
@@ -109,22 +119,64 @@ function ActivityEditModal({ activity, onSave, onClose }: EditModalProps) {
   );
 }
 
+// ─── Main tab ─────────────────────────────────────────────────────────────────
+
 interface Props {
   tripId: string;
   destination: string;
+  destinations: string[];
   activities: Activity[];
+  timeline: TimelineEvent[];
+  tripStartDate: string | null;
+  tripEndDate: string | null;
   isOwner: boolean;
 }
 
-export function ActivitiesTab({ tripId, destination, activities, isOwner }: Props) {
+const SORT_OPTIONS: { id: SortMode; label: string }[] = [
+  { id: 'city', label: 'City' },
+  { id: 'type', label: 'Type' },
+  { id: 'date', label: 'Date' },
+];
+
+export function ActivitiesTab({
+  tripId,
+  destination,
+  destinations,
+  activities,
+  timeline,
+  tripStartDate,
+  tripEndDate,
+  isOwner,
+}: Props) {
   const router = useRouter();
+  const [sortMode, setSortMode] = useState<SortMode>('city');
   const [refreshing, setRefreshing] = useState(false);
   const [editingActivity, setEditingActivity] = useState<Activity | null>(null);
+  const [schedulingActivity, setSchedulingActivity] = useState<Activity | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   const saved = activities.filter((a) => a.saved);
 
-  // Fetch suggestions and immediately save them all, deduplicating by name.
+  const groups =
+    sortMode === 'city'
+      ? groupByCity(saved)
+      : sortMode === 'type'
+      ? groupByType(saved)
+      : sortByDate(saved);
+
+  // ── Persistence ─────────────────────────────────────────────────────────────
+
+  async function persistActivities(updated: Activity[]) {
+    await fetch(`/api/trips/${tripId}/activities`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ activities: updated, destination }),
+    });
+    router.refresh();
+  }
+
+  // ── Handlers ─────────────────────────────────────────────────────────────────
+
   async function handleRefresh() {
     setRefreshing(true);
     try {
@@ -149,15 +201,6 @@ export function ActivitiesTab({ tripId, destination, activities, isOwner }: Prop
     }
   }
 
-  async function persistActivities(updated: Activity[]) {
-    await fetch(`/api/trips/${tripId}/activities`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ activities: updated, destination }),
-    });
-    router.refresh();
-  }
-
   async function handleEdit(updated: Activity) {
     const newList = activities.map((a) => (a.id === updated.id ? updated : a));
     await persistActivities(newList);
@@ -169,24 +212,78 @@ export function ActivitiesTab({ tripId, destination, activities, isOwner }: Prop
     setConfirmDelete(null);
   }
 
+  async function handleAdd(activity: Activity) {
+    await persistActivities([...activities, activity]);
+  }
+
+  async function handleSchedule(activityId: string, date: string, time: string) {
+    const newList = activities.map((a) =>
+      a.id === activityId
+        ? { ...a, scheduledDate: date, scheduledTime: time || undefined }
+        : a,
+    );
+    await persistActivities(newList);
+    setSchedulingActivity(null);
+  }
+
+  async function handleClearSchedule(activityId: string) {
+    const newList = activities.map((a) =>
+      a.id === activityId
+        ? { ...a, scheduledDate: undefined, scheduledTime: undefined }
+        : a,
+    );
+    await persistActivities(newList);
+    setSchedulingActivity(null);
+  }
+
+  // ── Render ───────────────────────────────────────────────────────────────────
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
+      {/* Quick-add bar (owner only) */}
       {isOwner && (
-        <div className="flex justify-end">
+        <QuickAddBar
+          tripId={tripId}
+          destinations={destinations.length > 0 ? destinations : [destination]}
+          onAdd={handleAdd}
+        />
+      )}
+
+      {/* Toolbar: sort controls + refresh */}
+      <div className="flex items-center gap-3">
+        {/* Sort segmented control */}
+        <div className="flex rounded-lg border border-border overflow-hidden text-sm">
+          {SORT_OPTIONS.map(({ id, label }) => (
+            <button
+              key={id}
+              onClick={() => setSortMode(id)}
+              className={cn(
+                'px-3 py-1.5 font-medium transition-colors',
+                sortMode === id
+                  ? 'bg-primary/10 text-text-base border-r border-border last:border-r-0'
+                  : 'text-text-muted hover:bg-surface hover:text-text-base border-r border-border last:border-r-0',
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {isOwner && (
           <Button
             variant="outline"
             size="sm"
             onClick={handleRefresh}
             disabled={refreshing}
-            className="gap-1.5"
+            className="gap-1.5 ml-auto"
           >
             {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-            {refreshing ? 'Generating…' : 'Refresh recommendations'}
+            {refreshing ? 'Generating…' : 'Refresh'}
           </Button>
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* Saved activities */}
+      {/* Empty state */}
       {saved.length === 0 && (
         <div className="py-16 flex flex-col items-center gap-4 text-center">
           <div className="rounded-full bg-surface p-4">
@@ -196,87 +293,33 @@ export function ActivitiesTab({ tripId, destination, activities, isOwner }: Prop
             <p className="font-semibold text-text-base">No activities yet</p>
             <p className="type-caption max-w-xs">
               Recommendations are generated automatically after import.
-              {isOwner && ' Or use "Refresh recommendations" to generate now.'}
+              {isOwner && ' Or use the bar above to add one now.'}
             </p>
           </div>
         </div>
       )}
 
-      {saved.length > 0 && (
-        <div className="space-y-3">
-          <ul className="space-y-3">
-            {saved.map((a) => (
-              <li key={a.id} className="rounded-xl border bg-card p-4 space-y-1.5">
-                <div className="flex items-start gap-2">
-                  <TripIcon type="activity" size="md" className="mt-0.5 shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <p className="font-medium text-sm">{a.name}</p>
-                    {a.city && <p className="text-xs text-muted-foreground">{a.city}</p>}
-                  </div>
-                  {isOwner && (
-                    <div className="flex gap-1 shrink-0">
-                      {confirmDelete === a.id ? (
-                        <>
-                          <Button variant="destructive" size="sm" onClick={() => handleDelete(a.id)}>
-                            Delete
-                          </Button>
-                          <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(null)}>
-                            Cancel
-                          </Button>
-                        </>
-                      ) : (
-                        <>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setEditingActivity(a)}
-                            className="text-muted-foreground hover:text-foreground"
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setConfirmDelete(a.id)}
-                            className="text-muted-foreground hover:text-destructive"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </>
-                      )}
-                    </div>
-                  )}
-                </div>
-                {a.description && (
-                  <p className="text-sm text-muted-foreground line-clamp-2">{a.description}</p>
-                )}
-                <div className="flex flex-wrap gap-x-4 gap-y-1">
-                  {a.estimatedCost && (
-                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <DollarSign className="h-3 w-3" />{a.estimatedCost}
-                    </span>
-                  )}
-                  {a.duration && (
-                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <Clock className="h-3 w-3" />{a.duration}
-                    </span>
-                  )}
-                  {a.scheduledDate && (
-                    <span className="flex items-center gap-1 text-xs text-primary-dark font-medium">
-                      <CalendarDays className="h-3 w-3" />
-                      {new Date(a.scheduledDate + 'T12:00:00').toLocaleDateString('en-US', {
-                        month: 'short', day: 'numeric',
-                      })}
-                      {a.scheduledTime ? ` at ${a.scheduledTime}` : ''}
-                    </span>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
+      {/* Grouped activity list */}
+      {groups.length > 0 && (
+        <div className="space-y-8">
+          {groups.map((group) => (
+            <ActivityGroupSection
+              key={group.label || '__all__'}
+              label={group.label}
+              activities={group.items}
+              isOwner={isOwner}
+              onEdit={setEditingActivity}
+              onSchedule={setSchedulingActivity}
+              confirmDelete={confirmDelete}
+              onDeleteRequest={setConfirmDelete}
+              onConfirmDelete={handleDelete}
+              onCancelDelete={() => setConfirmDelete(null)}
+            />
+          ))}
         </div>
       )}
 
+      {/* Edit modal */}
       {editingActivity && (
         <ActivityEditModal
           activity={editingActivity}
@@ -284,6 +327,18 @@ export function ActivitiesTab({ tripId, destination, activities, isOwner }: Prop
           onClose={() => setEditingActivity(null)}
         />
       )}
+
+      {/* Schedule sheet */}
+      <ScheduleSheet
+        activity={schedulingActivity}
+        timeline={timeline}
+        activities={activities}
+        tripStartDate={tripStartDate}
+        tripEndDate={tripEndDate}
+        onSchedule={handleSchedule}
+        onClear={handleClearSchedule}
+        onClose={() => setSchedulingActivity(null)}
+      />
     </div>
   );
 }

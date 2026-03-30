@@ -295,7 +295,11 @@ export function TripDetailClient({ trip, timeline, activities, artifacts, isOwne
           <ActivitiesTab
             tripId={trip.id}
             destination={trip.destination}
+            destinations={trip.destinations}
             activities={activities}
+            timeline={timeline}
+            tripStartDate={trip.startDate}
+            tripEndDate={trip.endDate}
             isOwner={isOwner}
           />
         )}

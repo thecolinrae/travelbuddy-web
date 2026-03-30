@@ -1,28 +1,7 @@
-import {
-  Landmark, Utensils, Mountain, Theater, ShoppingBag, Moon, Trees, HeartPulse,
-  Circle,
-} from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { fmt12 } from './utils';
-import type { ActivityEvent, Activity, ActivityType } from '@/types';
-
-const CATEGORY_ICONS: Record<ActivityType, React.ComponentType<{ className?: string }>> = {
-  sightseeing: Landmark,
-  food: Utensils,
-  adventure: Mountain,
-  culture: Theater,
-  shopping: ShoppingBag,
-  nightlife: Moon,
-  nature: Trees,
-  wellness: HeartPulse,
-};
-
-const ICON_CLASS = 'h-4 w-4 text-green-700 dark:text-green-400';
-
-function CategoryIcon({ type }: { type: string }) {
-  const Icon = CATEGORY_ICONS[type as ActivityType] ?? Circle;
-  return <Icon className={ICON_CLASS} />;
-}
+import { CategoryIcon } from '@/components/trip/activityIcons';
+import type { ActivityEvent, Activity } from '@/types';
 
 // ─── Timeline ActivityEvent (confirmed booking) ───────────────────────────────
 
