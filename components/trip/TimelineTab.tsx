@@ -7,12 +7,15 @@ import {
   PlaneTakeoff, PlaneLanding, GitMerge,
   BedDouble, LogOut,
   Bus, Train, Ship, Car, Navigation,
-  Receipt, Compass,
+  Receipt,
 } from 'lucide-react';
 import { fmt12 } from '@/components/trip/day/utils';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { CategoryIcon } from '@/components/trip/activityIcons';
+import { ActivityEditModal } from './activities/ActivityEditModal';
 import { EventFormModal, type TransportPrefill } from './EventFormModal';
-import type { TimelineEvent, ExpenseEvent, TransportType, TransportDepartureEvent, TransportArrivalEvent } from '@/types';
+import type { TimelineEvent, ExpenseEvent, TransportType, TransportDepartureEvent, TransportArrivalEvent, Activity } from '@/types';
 
 const TRANSPORT_ICONS: Record<TransportType, React.ComponentType<{ className?: string }>> = {
   bus: Bus,
@@ -39,7 +42,7 @@ function EventIcon({ e }: { e: TimelineEvent }) {
     return <Icon className="h-4 w-4 text-secondary" />;
   }
   if (e.type === 'expense') return <Receipt className="h-4 w-4 text-warning" />;
-  if (e.type === 'activity') return <Compass className="h-4 w-4 text-green-700 dark:text-green-400" />;
+  if (e.type === 'activity') return <Navigation className="h-4 w-4 text-green-700 dark:text-green-400" />;
   return <Navigation className="h-4 w-4 text-text-muted" />;
 }
 
@@ -78,16 +81,20 @@ function isEditable(e: TimelineEvent): boolean {
 interface Props {
   tripId: string;
   timeline: TimelineEvent[];
+  activities: Activity[];
   isOwner: boolean;
 }
 
-export function TimelineTab({ tripId, timeline, isOwner }: Props) {
+export function TimelineTab({ tripId, timeline, activities, isOwner }: Props) {
   const router = useRouter();
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<TimelineEvent | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [counterpartPrefill, setCounterpartPrefill] = useState<TransportPrefill | null>(null);
+  const [editingActivity, setEditingActivity] = useState<Activity | null>(null);
+  const [confirmDeleteActivity, setConfirmDeleteActivity] = useState<string | null>(null);
+  const [deletingActivity, setDeletingActivity] = useState<string | null>(null);
 
   async function handleDelete(id: string) {
     setDeleting(id);
@@ -100,7 +107,33 @@ export function TimelineTab({ tripId, timeline, isOwner }: Props) {
     }
   }
 
-  if (timeline.length === 0) {
+  async function handleDeleteActivity(id: string) {
+    setDeletingActivity(id);
+    try {
+      await fetch(`/api/trips/${tripId}/activities`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ activities: activities.filter((a) => a.id !== id) }),
+      });
+      router.refresh();
+    } finally {
+      setDeletingActivity(null);
+      setConfirmDeleteActivity(null);
+    }
+  }
+
+  async function handleEditActivity(updated: Activity) {
+    await fetch(`/api/trips/${tripId}/activities`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ activities: activities.map((a) => (a.id === updated.id ? updated : a)) }),
+    });
+    router.refresh();
+    setEditingActivity(null);
+  }
+
+  const hasContent = timeline.some((e) => e.type !== 'expense') || activities.some((a) => a.saved && a.scheduledDate);
+  if (!hasContent) {
     return (
       <div className="space-y-4">
         {isOwner && (
@@ -192,7 +225,7 @@ export function TimelineTab({ tripId, timeline, isOwner }: Props) {
     });
   }
 
-  // Group non-expense events by date
+  // Group non-expense timeline events by date
   const byDate = new Map<string, TimelineEvent[]>();
   for (const e of timeline) {
     if (e.type === 'expense') continue;
@@ -201,7 +234,18 @@ export function TimelineTab({ tripId, timeline, isOwner }: Props) {
     byDate.get(day)!.push(e);
   }
 
-  const days = [...byDate.entries()].sort(([a], [b]) => a.localeCompare(b));
+  // Merge scheduled saved activities into the same date buckets
+  const scheduledActivities = activities.filter((a) => a.saved && a.scheduledDate);
+  const activitiesByDate = new Map<string, Activity[]>();
+  for (const a of scheduledActivities) {
+    const day = a.scheduledDate!;
+    if (!activitiesByDate.has(day)) activitiesByDate.set(day, []);
+    activitiesByDate.get(day)!.push(a);
+  }
+
+  // Build the union of all dates
+  const allDates = new Set([...byDate.keys(), ...activitiesByDate.keys()]);
+  const days = [...allDates].sort();
 
   return (
     <div className="space-y-4">
@@ -214,94 +258,175 @@ export function TimelineTab({ tripId, timeline, isOwner }: Props) {
       )}
 
       <div className="space-y-8">
-        {days.map(([date, events]) => (
-          <div key={date}>
-            <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
-              {formatDate(date)}
-            </h3>
-            <ul className="space-y-2">
-              {events.map((e) => (
-                <li key={e.id} className="flex items-start gap-3 rounded-lg border bg-card px-4 py-3">
-                  <span className="mt-0.5 shrink-0"><EventIcon e={e} /></span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium">{eventHeadline(e)}</p>
-                    <div className="flex flex-wrap gap-x-3 mt-0.5">
-                      {e.time && (
-                        <span className="text-xs text-muted-foreground">{fmt12(e.time)}</span>
-                      )}
-                      {e.locationCity && (
-                        <span className="text-xs text-muted-foreground">{e.locationCity}</span>
-                      )}
-                    </div>
-                    {linkedExpenses.get(e.id)?.map((exp) => (
-                      <p key={exp.id} className="text-xs text-muted-foreground mt-1">
-                        {new Intl.NumberFormat('en-US', {
-                          style: 'currency',
-                          currency: exp.cost.preferredCurrency,
-                        }).format(exp.cost.amountPreferredCurrency)}
-                        {exp.description && ` · ${exp.description}`}
-                      </p>
-                    ))}
-                    {isOwner && (() => {
-                      const missing = getMissingCounterpart(e);
-                      if (!missing) return null;
-                      return (
-                        <button
-                          onClick={() => handleAddCounterpart(e as TransportDepartureEvent | TransportArrivalEvent)}
-                          className="mt-1.5 inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 hover:underline"
-                        >
-                          <Plus className="h-3 w-3" />
-                          Add missing {missing}
-                        </button>
-                      );
-                    })()}
-                  </div>
+        {days.map((date) => {
+          const events = byDate.get(date) ?? [];
+          const dayActivities = activitiesByDate.get(date) ?? [];
 
-                  {isOwner && (
-                    <div className="flex items-center gap-1 shrink-0">
-                      {confirmDelete === e.id ? (
-                        <>
-                          <Button
-                            variant="destructive"
-                            size="sm"
-                            onClick={() => handleDelete(e.id)}
-                            disabled={deleting === e.id}
-                          >
-                            {deleting === e.id ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Delete'}
-                          </Button>
-                          <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(null)}>
-                            Cancel
-                          </Button>
-                        </>
-                      ) : (
-                        <>
-                          {isEditable(e) && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => setEditing(e)}
-                              className="text-muted-foreground hover:text-foreground"
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
+          // Build merged items sorted by time (no time → end of list)
+          type EventItem = { kind: 'event'; data: TimelineEvent; time: string };
+          type ActivityItem = { kind: 'activity'; data: Activity; time: string };
+          type MergedItem = EventItem | ActivityItem;
+
+          const merged: MergedItem[] = [
+            ...events.map((e) => ({ kind: 'event' as const, data: e, time: e.time ?? '99:99' })),
+            ...dayActivities.map((a) => ({ kind: 'activity' as const, data: a, time: a.scheduledTime ?? '99:99' })),
+          ].sort((a, b) => a.time.localeCompare(b.time));
+
+          return (
+            <div key={date}>
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+                {formatDate(date)}
+              </h3>
+              <ul className="space-y-2">
+                {merged.map((item) => {
+                  if (item.kind === 'activity') {
+                    const a = item.data;
+                    return (
+                      <li key={`activity-${a.id}`} className="flex items-start gap-3 rounded-lg border bg-card px-4 py-3">
+                        <span className="mt-0.5 shrink-0"><CategoryIcon type={a.type} /></span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="text-sm font-medium">{a.name}</p>
+                            <Badge variant="outline" className="text-xs font-normal bg-primary/10 text-primary-foreground border-primary/30">
+                              Planned
+                            </Badge>
+                          </div>
+                          <div className="flex flex-wrap gap-x-3 mt-0.5">
+                            {a.scheduledTime && (
+                              <span className="text-xs text-muted-foreground">{fmt12(a.scheduledTime)}</span>
+                            )}
+                            {a.city && (
+                              <span className="text-xs text-muted-foreground">{a.city}</span>
+                            )}
+                          </div>
+                        </div>
+                        {isOwner && (
+                          <div className="flex items-center gap-1 shrink-0">
+                            {confirmDeleteActivity === a.id ? (
+                              <>
+                                <Button
+                                  variant="destructive"
+                                  size="sm"
+                                  onClick={() => handleDeleteActivity(a.id)}
+                                  disabled={deletingActivity === a.id}
+                                >
+                                  {deletingActivity === a.id ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Delete'}
+                                </Button>
+                                <Button variant="ghost" size="sm" onClick={() => setConfirmDeleteActivity(null)}>
+                                  Cancel
+                                </Button>
+                              </>
+                            ) : (
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setEditingActivity(a)}
+                                  className="text-muted-foreground hover:text-foreground"
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setConfirmDeleteActivity(a.id)}
+                                  className="text-muted-foreground hover:text-destructive"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </li>
+                    );
+                  }
+
+                  const e = item.data;
+                  return (
+                    <li key={e.id} className="flex items-start gap-3 rounded-lg border bg-card px-4 py-3">
+                      <span className="mt-0.5 shrink-0"><EventIcon e={e} /></span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium">{eventHeadline(e)}</p>
+                        <div className="flex flex-wrap gap-x-3 mt-0.5">
+                          {e.time && (
+                            <span className="text-xs text-muted-foreground">{fmt12(e.time)}</span>
                           )}
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setConfirmDelete(e.id)}
-                            className="text-muted-foreground hover:text-destructive"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </>
+                          {e.locationCity && (
+                            <span className="text-xs text-muted-foreground">{e.locationCity}</span>
+                          )}
+                        </div>
+                        {linkedExpenses.get(e.id)?.map((exp) => (
+                          <p key={exp.id} className="text-xs text-muted-foreground mt-1">
+                            {new Intl.NumberFormat('en-US', {
+                              style: 'currency',
+                              currency: exp.cost.preferredCurrency,
+                            }).format(exp.cost.amountPreferredCurrency)}
+                            {exp.description && ` · ${exp.description}`}
+                          </p>
+                        ))}
+                        {isOwner && (() => {
+                          const missing = getMissingCounterpart(e);
+                          if (!missing) return null;
+                          return (
+                            <button
+                              onClick={() => handleAddCounterpart(e as TransportDepartureEvent | TransportArrivalEvent)}
+                              className="mt-1.5 inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 hover:underline"
+                            >
+                              <Plus className="h-3 w-3" />
+                              Add missing {missing}
+                            </button>
+                          );
+                        })()}
+                      </div>
+
+                      {isOwner && (
+                        <div className="flex items-center gap-1 shrink-0">
+                          {confirmDelete === e.id ? (
+                            <>
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                onClick={() => handleDelete(e.id)}
+                                disabled={deleting === e.id}
+                              >
+                                {deleting === e.id ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Delete'}
+                              </Button>
+                              <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(null)}>
+                                Cancel
+                              </Button>
+                            </>
+                          ) : (
+                            <>
+                              {isEditable(e) && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setEditing(e)}
+                                  className="text-muted-foreground hover:text-foreground"
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                              )}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setConfirmDelete(e.id)}
+                                className="text-muted-foreground hover:text-destructive"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </>
+                          )}
+                        </div>
                       )}
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          );
+        })}
       </div>
 
       {addOpen && (
@@ -328,6 +453,13 @@ export function TimelineTab({ tripId, timeline, isOwner }: Props) {
           onClose={() => setCounterpartPrefill(null)}
           onSaved={() => { router.refresh(); setCounterpartPrefill(null); }}
           transportPrefill={counterpartPrefill}
+        />
+      )}
+      {editingActivity && (
+        <ActivityEditModal
+          activity={editingActivity}
+          onSave={handleEditActivity}
+          onClose={() => setEditingActivity(null)}
         />
       )}
     </div>

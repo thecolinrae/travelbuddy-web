@@ -275,6 +275,7 @@ export function TripDetailClient({ trip, timeline, activities, artifacts, isOwne
             <TimelineTab
               tripId={trip.id}
               timeline={timeline}
+              activities={activities}
               isOwner={isOwner}
             />
           </div>
