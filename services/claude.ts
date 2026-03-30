@@ -375,6 +375,157 @@ export async function generatePackingList(
   return callClaude(PACKING_SYSTEM, prompt);
 }
 
+// ─── Trip Chat (streaming + tool use) ────────────────────────────────────────
+
+export interface ChatToolDefinition {
+  name: string;
+  description: string;
+  input_schema: {
+    type: 'object';
+    properties: Record<string, unknown>;
+    required: string[];
+  };
+}
+
+// Anthropic message formats for multi-turn tool use
+export type AnthropicContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
+  | { type: 'tool_result'; tool_use_id: string; content: string };
+
+export type AnthropicChatMessage =
+  | { role: 'user'; content: string | AnthropicContentBlock[] }
+  | { role: 'assistant'; content: AnthropicContentBlock[] };
+
+export type ChatStreamEvent =
+  | { type: 'text_delta'; text: string }
+  | { type: 'tool_call'; id: string; name: string; input: Record<string, unknown> }
+  | { type: 'message_stop' };
+
+async function* readLines(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) yield line;
+  }
+  if (buffer) yield buffer;
+}
+
+export async function* streamTripChat(
+  systemPrompt: string,
+  messages: AnthropicChatMessage[],
+  tools: ChatToolDefinition[],
+): AsyncGenerator<ChatStreamEvent> {
+  const apiKey = getApiKey();
+  let attempt = 0;
+
+  while (true) {
+    const res = await fetch(ANTHROPIC_API, {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: MODEL_GENERATE,
+        max_tokens: 1024,
+        system: systemPrompt,
+        messages,
+        tools,
+        stream: true,
+      }),
+    });
+
+    if (res.status === 429 || res.status === 529) {
+      if (attempt >= MAX_RETRIES) {
+        const err = await res.text();
+        throw new Error(`Claude API error ${res.status}: ${err}`);
+      }
+      const retryAfter = parseInt(res.headers.get('retry-after') ?? '10', 10);
+      await new Promise<void>((r) => setTimeout(r, Math.min(retryAfter * 1000, 60_000)));
+      attempt++;
+      continue;
+    }
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Claude API error ${res.status}: ${err}`);
+    }
+
+    if (!res.body) throw new Error('No response body from Claude API');
+
+    // Per-block state: track type, id, name, and accumulated json for tool_use blocks
+    const blockState: Record<
+      number,
+      { type: 'text' | 'tool_use'; id?: string; name?: string; jsonBuffer: string }
+    > = {};
+
+    for await (const line of readLines(res.body)) {
+      if (!line.startsWith('data: ')) continue;
+      const raw = line.slice(6);
+      if (raw === '[DONE]') break;
+
+      let data: Record<string, unknown>;
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        continue;
+      }
+
+      const eventType = data.type as string;
+
+      if (eventType === 'content_block_start') {
+        const index = data.index as number;
+        const block = data.content_block as { type: string; id?: string; name?: string };
+        blockState[index] = {
+          type: block.type === 'tool_use' ? 'tool_use' : 'text',
+          id: block.id,
+          name: block.name,
+          jsonBuffer: '',
+        };
+      } else if (eventType === 'content_block_delta') {
+        const index = data.index as number;
+        const delta = data.delta as { type: string; text?: string; partial_json?: string };
+        const state = blockState[index];
+        if (!state) continue;
+
+        if (delta.type === 'text_delta' && delta.text) {
+          yield { type: 'text_delta', text: delta.text };
+        } else if (delta.type === 'input_json_delta' && delta.partial_json) {
+          state.jsonBuffer += delta.partial_json;
+        }
+      } else if (eventType === 'content_block_stop') {
+        const index = data.index as number;
+        const state = blockState[index];
+        if (state?.type === 'tool_use' && state.id && state.name) {
+          let input: Record<string, unknown> = {};
+          try {
+            input = JSON.parse(state.jsonBuffer);
+          } catch {
+            // malformed tool input — skip
+          }
+          yield { type: 'tool_call', id: state.id, name: state.name, input };
+        }
+      } else if (eventType === 'message_stop') {
+        yield { type: 'message_stop' };
+        return;
+      } else if (eventType === 'error') {
+        const err = data.error as { message?: string };
+        throw new Error(`Claude stream error: ${err?.message ?? JSON.stringify(data)}`);
+      }
+    }
+
+    return;
+  }
+}
+
 // ─── Concurrency Limiter ──────────────────────────────────────────────────────
 
 export const CLAUDE_PARSE_CONCURRENCY = 3;

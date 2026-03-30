@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
-import { ArrowLeft, Plus, Share2, Pencil, Trash2 } from 'lucide-react';
+import { ArrowLeft, Plus, Share2, Pencil, Trash2, MessageCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -24,6 +24,7 @@ import { MapTab } from '@/components/trip/MapTab';
 import { ActivitiesTab } from '@/components/trip/ActivitiesTab';
 import { DocumentsTab } from '@/components/trip/DocumentsTab';
 import { NotesTab } from '@/components/trip/NotesTab';
+import { TripChatPanel } from '@/components/trip/TripChatPanel';
 import type { ArtifactInfo } from '@/components/trip/DocumentsTab';
 import type { TimelineEvent, Activity, BudgetItemCategory } from '@/types';
 
@@ -109,6 +110,7 @@ export function TripDetailClient({ trip, timeline, activities: initialActivities
   const [editOpen, setEditOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
 
   const destinations =
     trip.destinations?.length > 1
@@ -120,6 +122,10 @@ export function TripDetailClient({ trip, timeline, activities: initialActivities
   const flightCount = timeline.filter(
     (e) => e.type === 'flight' && e.subtype === 'departure',
   ).length;
+
+  function handleActivityMutation() {
+    router.refresh();
+  }
 
   async function handleDelete() {
     setDeleting(true);
@@ -326,6 +332,26 @@ export function TripDetailClient({ trip, timeline, activities: initialActivities
           />
         )}
       </div>
+
+      {/* Floating chat button */}
+      <button
+        onClick={() => setChatOpen(true)}
+        aria-label="Open trip assistant"
+        className="fixed bottom-6 right-6 z-20 flex h-14 w-14 items-center justify-center
+                   rounded-full bg-primary text-primary-foreground shadow-lg
+                   hover:bg-primary-dark transition-colors focus:outline-none
+                   focus:ring-2 focus:ring-primary focus:ring-offset-2"
+      >
+        <MessageCircle className="h-6 w-6" />
+      </button>
+
+      <TripChatPanel
+        tripId={trip.id}
+        isOpen={chatOpen}
+        onClose={() => setChatOpen(false)}
+        currentDayIndex={dayIndex}
+        onActivityMutation={handleActivityMutation}
+      />
 
       {/* Modals */}
       {isOwner && (
