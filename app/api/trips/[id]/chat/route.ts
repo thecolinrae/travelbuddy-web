@@ -4,6 +4,7 @@ import { buildTripContext } from '@/services/tripContext';
 import {
   streamTripChat,
   suggestActivities,
+  enrichActivity,
   type ChatToolDefinition,
   type AnthropicChatMessage,
   type AnthropicContentBlock,
@@ -162,6 +163,29 @@ interface ToolExecutionResult {
   mutated: boolean;
 }
 
+/** Enrich an activity in-place if it has no address yet. Non-fatal. */
+async function enrichIfMissingAddress(activity: Activity): Promise<Activity> {
+  if (activity.address) return activity;
+  try {
+    const enriched = await enrichActivity(activity.name, activity.city ?? '');
+    return {
+      ...activity,
+      description: activity.description || enriched.description || activity.description,
+      type: activity.type || enriched.type || activity.type,
+      estimatedCost: activity.estimatedCost ?? enriched.estimatedCost,
+      duration: activity.duration ?? enriched.duration,
+      bestTime: activity.bestTime ?? enriched.bestTime,
+      tips: activity.tips ?? enriched.tips,
+      familyFriendly: activity.familyFriendly ?? enriched.familyFriendly,
+      highlights: activity.highlights ?? enriched.highlights,
+      address: enriched.locationAddress,
+      city: activity.city || enriched.city || activity.city,
+    };
+  } catch {
+    return activity;
+  }
+}
+
 async function executeTool(
   toolName: string,
   input: Record<string, unknown>,
@@ -191,8 +215,9 @@ async function executeTool(
       saved: true,
     };
 
-    await saveActivities(tripId, destination, [...activities, newActivity]);
-    return { content: JSON.stringify({ success: true, activity: newActivity }), mutated: true };
+    const enrichedActivity = await enrichIfMissingAddress(newActivity);
+    await saveActivities(tripId, destination, [...activities, enrichedActivity]);
+    return { content: JSON.stringify({ success: true, activity: enrichedActivity }), mutated: true };
   }
 
   if (toolName === 'schedule_activity' || toolName === 'reschedule_activity') {
@@ -205,11 +230,12 @@ async function executeTool(
       return { content: JSON.stringify({ error: 'Activity not found' }), mutated: false };
     }
 
-    activities[idx] = {
+    const updated: Activity = {
       ...activities[idx],
       scheduledDate: input.scheduledDate as string,
       scheduledTime: (input.scheduledTime as string | undefined) ?? undefined,
     };
+    activities[idx] = await enrichIfMissingAddress(updated);
 
     await saveActivities(tripId, destination, activities);
     return { content: JSON.stringify({ success: true, activity: activities[idx] }), mutated: true };
