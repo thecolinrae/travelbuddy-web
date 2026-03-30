@@ -1,5 +1,5 @@
 import type { TripRow } from '@/services/db';
-import type { TimelineEvent, Activity } from '@/types';
+import type { TimelineEvent, Activity, BudgetItemCategory } from '@/types';
 
 export interface TripContextInput {
   trip: TripRow;
@@ -140,6 +140,71 @@ function buildActivitiesBank(activities: Activity[]): string {
     .join('\n');
 }
 
+const CATEGORY_LABELS: Record<BudgetItemCategory, string> = {
+  flights: 'Flights',
+  hotels: 'Hotels',
+  car_rental: 'Car rental',
+  activities: 'Activities',
+  transport: 'Transport',
+  food: 'Food',
+  insurance: 'Insurance',
+  other: 'Other',
+};
+
+function buildBudgetSection(trip: TripRow, timeline: TimelineEvent[]): string {
+  const currency = trip.preferredCurrency;
+  const hasGoal = trip.budgetGoal != null;
+  const hasCategoryGoals =
+    trip.categoryGoals != null && Object.keys(trip.categoryGoals).length > 0;
+
+  if (!hasGoal && !hasCategoryGoals) return '';
+
+  // Sum expenses from timeline by category
+  const spentByCategory: Partial<Record<BudgetItemCategory, number>> = {};
+  let totalSpent = 0;
+  for (const event of timeline) {
+    if (event.type !== 'expense') continue;
+    const cat = event.category as BudgetItemCategory;
+    spentByCategory[cat] = (spentByCategory[cat] ?? 0) + event.cost.amountPreferredCurrency;
+    totalSpent += event.cost.amountPreferredCurrency;
+  }
+
+  const fmt = (n: number) => `${currency} ${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+
+  const lines: string[] = ['## Budget'];
+  lines.push(`- Currency: ${currency}`);
+
+  if (hasGoal) {
+    const goal = trip.budgetGoal!;
+    const remaining = goal - totalSpent;
+    lines.push(
+      `- Overall: ${fmt(goal)} goal | ${fmt(totalSpent)} spent | ${fmt(remaining)} remaining`,
+    );
+  } else {
+    lines.push(`- Overall spent: ${fmt(totalSpent)}`);
+  }
+
+  if (hasCategoryGoals) {
+    lines.push('- Category targets:');
+    for (const [cat, goal] of Object.entries(trip.categoryGoals!)) {
+      const spent = spentByCategory[cat as BudgetItemCategory] ?? 0;
+      const remaining = (goal as number) - spent;
+      const label = CATEGORY_LABELS[cat as BudgetItemCategory] ?? cat;
+      lines.push(
+        `  - ${label}: ${fmt(goal as number)} goal | ${fmt(spent)} spent | ${fmt(remaining)} remaining`,
+      );
+    }
+    // Show unbudgeted categories that have spend
+    for (const [cat, spent] of Object.entries(spentByCategory)) {
+      if (trip.categoryGoals![cat as BudgetItemCategory] != null) continue;
+      const label = CATEGORY_LABELS[cat as BudgetItemCategory] ?? cat;
+      lines.push(`  - ${label}: no target set | ${fmt(spent as number)} spent`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
 export function buildTripContext(input: TripContextInput): TripContextResult {
   const { trip, timeline, activities, currentDayIndex } = input;
   const today = new Date().toISOString().slice(0, 10);
@@ -157,10 +222,13 @@ export function buildTripContext(input: TripContextInput): TripContextResult {
     `- Status: ${trip.status}`,
     ``,
     `## What you can do`,
-    `You have tools to manage activities: add new ones, schedule or reschedule existing ones, remove them, or suggest recommendations.`,
-    `You cannot modify flights, hotels, or transportation — those come from imported bookings.`,
+    `You have tools to manage activities (add, schedule, reschedule, remove, suggest) and to update budget targets.`,
+    `You cannot modify flights, hotels, transportation, or existing expenses — those come from imported bookings.`,
     `When adding activities, confirm the date with the user unless they have already specified one.`,
     `When suggesting activities, use the suggest_activities tool, present the results, and offer to add specific ones.`,
+    `When the user asks to set or adjust a budget, use the set_budget_targets tool. You can update the overall goal and/or individual category targets. Never delete or change existing expense records.`,
+    ``,
+    buildBudgetSection(trip, timeline),
     ``,
     `## Activities Bank (${activities.length} saved)`,
     buildActivitiesBank(activities),

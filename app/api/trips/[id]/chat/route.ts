@@ -1,5 +1,5 @@
 import { auth } from '@/lib/auth';
-import { getTrip, loadTimeline, loadActivities, saveActivities } from '@/services/db';
+import { getTrip, loadTimeline, loadActivities, saveActivities, updateBudgetGoals } from '@/services/db';
 import { buildTripContext } from '@/services/tripContext';
 import {
   streamTripChat,
@@ -9,7 +9,8 @@ import {
   type AnthropicContentBlock,
 } from '@/services/claude';
 import { nanoid } from '@/services/nanoid';
-import type { Activity, ActivityType } from '@/types';
+import type { Activity, ActivityType, BudgetItemCategory } from '@/types';
+import type { TripRow } from '@/services/db';
 
 // ─── Request / SSE event types ────────────────────────────────────────────────
 
@@ -120,6 +121,38 @@ const CHAT_TOOLS: ChatToolDefinition[] = [
       required: ['city'],
     },
   },
+  {
+    name: 'set_budget_targets',
+    description:
+      "Update the trip's overall budget goal and/or per-category spending targets. Use this when the user asks to set or adjust their budget. Never use this to change or delete existing expense records.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        budgetGoal: {
+          type: 'number',
+          description:
+            "New overall trip budget in the trip's preferred currency. Omit to leave unchanged.",
+        },
+        categoryGoals: {
+          type: 'object',
+          description:
+            'Per-category spending targets to set or update. Only include categories you want to change — existing categories not listed here are left unchanged.',
+          properties: {
+            flights: { type: 'number' },
+            hotels: { type: 'number' },
+            car_rental: { type: 'number' },
+            activities: { type: 'number' },
+            transport: { type: 'number' },
+            food: { type: 'number' },
+            insurance: { type: 'number' },
+            other: { type: 'number' },
+          },
+          additionalProperties: false,
+        },
+      },
+      required: [],
+    },
+  },
 ];
 
 // ─── Tool execution ───────────────────────────────────────────────────────────
@@ -133,10 +166,12 @@ async function executeTool(
   toolName: string,
   input: Record<string, unknown>,
   tripId: string,
-  tripDestination: string,
-  tripStartDate: string | null,
-  tripEndDate: string | null,
+  userId: string,
+  trip: TripRow,
 ): Promise<ToolExecutionResult> {
+  const tripDestination = trip.destination;
+  const tripStartDate = trip.startDate;
+  const tripEndDate = trip.endDate;
   if (toolName === 'add_activity') {
     const existing = await loadActivities(tripId);
     const activities: Activity[] = existing?.savedActivities ?? [];
@@ -212,6 +247,29 @@ async function executeTool(
       input.prompt as string | undefined,
     );
     return { content: JSON.stringify({ suggestions }), mutated: false };
+  }
+
+  if (toolName === 'set_budget_targets') {
+    const newGoal = input.budgetGoal as number | undefined;
+    const newCategoryGoals = input.categoryGoals as
+      | Partial<Record<BudgetItemCategory, number>>
+      | undefined;
+
+    const updatedGoal = newGoal !== undefined ? newGoal : trip.budgetGoal;
+    const updatedCategoryGoals: Partial<Record<BudgetItemCategory, number>> = {
+      ...(trip.categoryGoals ?? {}),
+      ...(newCategoryGoals ?? {}),
+    };
+
+    await updateBudgetGoals(tripId, userId, updatedGoal ?? null, updatedCategoryGoals);
+    return {
+      content: JSON.stringify({
+        success: true,
+        budgetGoal: updatedGoal,
+        categoryGoals: updatedCategoryGoals,
+      }),
+      mutated: true,
+    };
   }
 
   return { content: JSON.stringify({ error: `Unknown tool: ${toolName}` }), mutated: false };
@@ -294,7 +352,7 @@ export async function POST(
             // Read-only users cannot mutate activities
             if (
               !isOwner &&
-              ['add_activity', 'schedule_activity', 'reschedule_activity', 'remove_activity'].includes(
+              ['add_activity', 'schedule_activity', 'reschedule_activity', 'remove_activity', 'set_budget_targets'].includes(
                 tc.name,
               )
             ) {
@@ -312,9 +370,8 @@ export async function POST(
               tc.name,
               tc.input,
               tripId,
-              trip.destination,
-              trip.startDate,
-              trip.endDate,
+              userId,
+              trip,
             );
             const parsed = JSON.parse(result.content) as unknown;
             send({ type: 'tool_result', tool: tc.name, result: parsed, mutated: result.mutated });
