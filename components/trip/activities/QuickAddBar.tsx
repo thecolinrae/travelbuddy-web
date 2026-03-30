@@ -7,17 +7,9 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { CategoryIcon } from '@/components/trip/activityIcons';
 import { nanoid } from '@/services/nanoid';
-import type { Activity, ActivityType } from '@/types';
+import { toActivityType } from './activityTypeUtils';
+import type { Activity } from '@/types';
 import type { EnrichedActivityResult } from '@/services/claude';
-
-const VALID_TYPES: ActivityType[] = [
-  'sightseeing', 'food', 'adventure', 'culture', 'shopping', 'nightlife', 'nature', 'wellness',
-];
-
-function toActivityType(raw?: string): ActivityType {
-  if (raw && VALID_TYPES.includes(raw as ActivityType)) return raw as ActivityType;
-  return 'sightseeing';
-}
 
 interface QuickAddBarProps {
   tripId: string;

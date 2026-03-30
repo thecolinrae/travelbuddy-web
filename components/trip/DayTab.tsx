@@ -24,11 +24,14 @@ interface TripSnapshot {
 
 interface DayTabProps {
   trip: TripSnapshot;
+  tripId: string;
   timeline: TimelineEvent[];
   activities: Activity[];
+  isOwner: boolean;
   currentIndex: number;
   onIndexChange: (index: number) => void;
   onViewTimeline?: () => void;
+  onActivityUpdate: (updated: Activity[]) => void;
 }
 
 function getToday(): string {
@@ -77,7 +80,20 @@ function PlanThisDayStub() {
   );
 }
 
-function renderItem(item: DayItem, isPast: boolean, isFirstFuture: boolean, nowTime: string) {
+interface RenderContext {
+  tripId: string;
+  activities: Activity[];
+  isOwner: boolean;
+  onActivityUpdate: (updated: Activity[]) => void;
+}
+
+function renderItem(
+  item: DayItem,
+  isPast: boolean,
+  isFirstFuture: boolean,
+  nowTime: string,
+  ctx: RenderContext,
+) {
   if (item.kind === 'now') {
     return <NowIndicator key="now" time={nowTime} />;
   }
@@ -90,7 +106,15 @@ function renderItem(item: DayItem, isPast: boolean, isFirstFuture: boolean, nowT
   let card: React.ReactNode;
 
   if (item.kind === 'activity') {
-    card = <ScheduledActivityCard activity={item.activity} />;
+    card = (
+      <ScheduledActivityCard
+        activity={item.activity}
+        tripId={ctx.tripId}
+        activities={ctx.activities}
+        isOwner={ctx.isOwner}
+        onActivityUpdate={ctx.onActivityUpdate}
+      />
+    );
   } else {
     const e = item.event;
     if (e.type === 'flight') {
@@ -110,7 +134,7 @@ function renderItem(item: DayItem, isPast: boolean, isFirstFuture: boolean, nowT
   return <div className={wrapperClass}>{card}</div>;
 }
 
-export function DayTab({ trip, timeline, activities, currentIndex, onIndexChange, onViewTimeline }: DayTabProps) {
+export function DayTab({ trip, tripId, timeline, activities, isOwner, currentIndex, onIndexChange, onViewTimeline, onActivityUpdate }: DayTabProps) {
   const days = buildDayRange(trip.startDate, trip.endDate, timeline, activities);
 
   if (days.length === 0) {
@@ -172,7 +196,7 @@ export function DayTab({ trip, timeline, activities, currentIndex, onIndexChange
                 : item.event.id;
             return (
               <div key={key}>
-                {renderItem(item, isPast, isFirstFuture, nowTime)}
+                {renderItem(item, isPast, isFirstFuture, nowTime, { tripId, activities, isOwner, onActivityUpdate })}
               </div>
             );
           })

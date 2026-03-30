@@ -84,10 +84,11 @@ function formatDateRange(start: string | null, end: string | null): string {
   return fmt((start ?? end)!);
 }
 
-export function TripDetailClient({ trip, timeline, activities, artifacts, isOwner }: Props) {
+export function TripDetailClient({ trip, timeline, activities: initialActivities, artifacts, isOwner }: Props) {
   const router = useRouter();
   const TABS = buildTabs(trip.status);
   const [activeTab, setActiveTab] = useState<TabId>('day');
+  const [activities, setActivities] = useState(initialActivities);
 
   const days = useMemo(
     () => buildDayRange(trip.startDate, trip.endDate, timeline, activities),
@@ -256,11 +257,14 @@ export function TripDetailClient({ trip, timeline, activities, artifacts, isOwne
         {activeTab === 'day' && (
           <DayTab
             trip={trip}
+            tripId={trip.id}
             timeline={timeline}
             activities={activities}
+            isOwner={isOwner}
             currentIndex={dayIndex}
             onIndexChange={setDayIndex}
             onViewTimeline={() => setActiveTab('timeline')}
+            onActivityUpdate={setActivities}
           />
         )}
         {activeTab === 'timeline' && (
