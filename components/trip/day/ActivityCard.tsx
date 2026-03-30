@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { fmt12 } from './utils';
 import { CategoryIcon } from '@/components/trip/activityIcons';
 import { ActivityDetailSheet } from './ActivityDetailSheet';
+import { EventDetailSheet } from './EventDetailSheet';
 import type { ActivityEvent, Activity } from '@/types';
 
 // ─── Timeline ActivityEvent (confirmed booking) ───────────────────────────────
@@ -15,42 +16,53 @@ interface ActivityEventCardProps {
 }
 
 export function ActivityEventCard({ event }: ActivityEventCardProps) {
+  const [open, setOpen] = useState(false);
   const highlights = event.highlights?.slice(0, 4) ?? [];
 
   return (
-    <div className="rounded-xl border bg-card px-4 py-3 space-y-2">
-      <div className="flex items-start gap-2">
-        <CategoryIcon type={event.category} />
-        <div className="min-w-0 flex-1">
-          <p className="font-medium text-text-base leading-snug">{event.description}</p>
-          <p className="text-xs text-text-muted mt-0.5 capitalize">
-            {event.category}{event.duration ? ` · ${event.duration}` : ''}
-          </p>
+    <>
+      <div className="rounded-xl border bg-card px-4 py-3 space-y-2">
+        <div className="flex items-start gap-2">
+          <CategoryIcon type={event.category} />
+          <div className="min-w-0 flex-1">
+            <p className="font-medium text-text-base leading-snug">{event.description}</p>
+            <p className="text-xs text-text-muted mt-0.5 capitalize">
+              {event.category}{event.duration ? ` · ${event.duration}` : ''}
+            </p>
+          </div>
+          {event.time && (
+            <span className="text-xs text-text-muted shrink-0 tabular-nums">{fmt12(event.time)}</span>
+          )}
+          <button
+            aria-label="View details"
+            onClick={() => setOpen(true)}
+            className="shrink-0 text-text-muted hover:text-text-base transition-colors"
+          >
+            <Info className="h-4 w-4" />
+          </button>
         </div>
-        {event.time && (
-          <span className="text-xs text-text-muted shrink-0 tabular-nums">{fmt12(event.time)}</span>
+
+        {event.tips && (
+          <p className="text-sm text-text-muted italic leading-relaxed">{event.tips}</p>
+        )}
+
+        {highlights.length > 0 && (
+          <ul className="space-y-0.5">
+            {highlights.map((h, i) => (
+              <li key={i} className="text-sm text-text-muted flex items-start gap-1.5">
+                <span className="mt-1.5 h-1 w-1 rounded-full bg-text-muted shrink-0" />
+                {h}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {event.bookingRef && (
+          <p className="text-xs text-text-muted text-right">{event.bookingRef}</p>
         )}
       </div>
-
-      {event.tips && (
-        <p className="text-sm text-text-muted italic leading-relaxed">{event.tips}</p>
-      )}
-
-      {highlights.length > 0 && (
-        <ul className="space-y-0.5">
-          {highlights.map((h, i) => (
-            <li key={i} className="text-sm text-text-muted flex items-start gap-1.5">
-              <span className="mt-1.5 h-1 w-1 rounded-full bg-text-muted shrink-0" />
-              {h}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {event.bookingRef && (
-        <p className="text-xs text-text-muted text-right">{event.bookingRef}</p>
-      )}
-    </div>
+      <EventDetailSheet open={open} onOpenChange={setOpen} event={event} />
+    </>
   );
 }
 
