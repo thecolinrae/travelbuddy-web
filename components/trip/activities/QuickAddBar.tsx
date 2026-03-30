@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Plus, Loader2, CheckCircle2, X, Clock, DollarSign } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { CategoryIcon } from '@/components/trip/activityIcons';
 import { nanoid } from '@/services/nanoid';
 import { toActivityType } from './activityTypeUtils';
+import { cn } from '@/lib/utils';
 import type { Activity } from '@/types';
 import type { EnrichedActivityResult } from '@/services/claude';
 
@@ -18,10 +19,20 @@ interface QuickAddBarProps {
 }
 
 export function QuickAddBar({ tripId, destinations, onAdd }: QuickAddBarProps) {
+  const multiCity = destinations.length > 1;
   const [input, setInput] = useState('');
+  const [selectedCity, setSelectedCity] = useState(destinations[0] ?? '');
   const [status, setStatus] = useState<'idle' | 'loading' | 'preview' | 'error'>('idle');
   const [preview, setPreview] = useState<Activity | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
+
+  // Auto-select city when the user types a destination name in the input
+  useEffect(() => {
+    if (!multiCity) return;
+    const lower = input.toLowerCase();
+    const match = destinations.find((d) => lower.includes(d.toLowerCase()));
+    if (match) setSelectedCity(match);
+  }, [input]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleLookup() {
     const trimmed = input.trim();
@@ -32,7 +43,7 @@ export function QuickAddBar({ tripId, destinations, onAdd }: QuickAddBarProps) {
       const res = await fetch(`/api/trips/${tripId}/activities/enrich`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: trimmed, city: destinations[0] }),
+        body: JSON.stringify({ name: trimmed, city: selectedCity }),
       });
       if (!res.ok) throw new Error('Request failed');
       const result: EnrichedActivityResult = await res.json();
@@ -48,7 +59,7 @@ export function QuickAddBar({ tripId, destinations, onAdd }: QuickAddBarProps) {
         tips: result.tips,
         familyFriendly: result.familyFriendly,
         highlights: result.highlights,
-        city: result.city ?? destinations[0],
+        city: result.city ?? selectedCity,
         address: result.locationAddress,
         saved: true,
       };
@@ -70,6 +81,8 @@ export function QuickAddBar({ tripId, destinations, onAdd }: QuickAddBarProps) {
 
   function handleDiscard() {
     setPreview(null);
+    setInput('');
+    setSelectedCity(destinations[0] ?? '');
     setStatus('idle');
   }
 
@@ -78,13 +91,34 @@ export function QuickAddBar({ tripId, destinations, onAdd }: QuickAddBarProps) {
 
   return (
     <div className="rounded-xl border bg-surface p-3 space-y-3">
+      {/* City selector — only shown for multi-destination trips */}
+      {multiCity && (
+        <div className="flex flex-wrap gap-1.5">
+          {destinations.map((d) => (
+            <button
+              key={d}
+              onClick={() => setSelectedCity(d)}
+              disabled={isLoading || isPreview}
+              className={cn(
+                'rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors',
+                selectedCity === d
+                  ? 'bg-primary/10 border-primary/50 text-text-base'
+                  : 'border-border text-text-muted hover:text-text-base hover:border-border',
+              )}
+            >
+              {d}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Input row */}
       <div className="flex gap-2">
         <Input
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && !isLoading && !isPreview && handleLookup()}
-          placeholder="Add an activity — name it or describe it"
+          placeholder={multiCity ? `Add an activity in ${selectedCity}` : 'Add an activity — name it or describe it'}
           disabled={isLoading || isPreview}
           className="flex-1"
         />
