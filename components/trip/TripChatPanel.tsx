@@ -2,6 +2,8 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { Send, MessageCircle } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Button } from '@/components/ui/button';
 import {
   Sheet,
@@ -38,6 +40,85 @@ interface TripChatPanelProps {
   onActivityMutation: () => void;
 }
 
+// ─── Markdown renderer ────────────────────────────────────────────────────────
+
+function ChatMarkdown({ content }: { content: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        p: ({ children }) => (
+          <p className="text-sm leading-relaxed mb-2 last:mb-0">{children}</p>
+        ),
+        strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+        em: ({ children }) => <em className="italic">{children}</em>,
+        ul: ({ children }) => (
+          <ul className="mb-2 last:mb-0 pl-4 space-y-0.5 list-disc text-sm leading-relaxed">
+            {children}
+          </ul>
+        ),
+        ol: ({ children }) => (
+          <ol className="mb-2 last:mb-0 pl-4 space-y-0.5 list-decimal text-sm leading-relaxed">
+            {children}
+          </ol>
+        ),
+        li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+        h1: ({ children }) => (
+          <h1 className="font-display font-semibold text-base leading-snug mt-3 mb-1 first:mt-0">
+            {children}
+          </h1>
+        ),
+        h2: ({ children }) => (
+          <h2 className="font-display font-semibold text-sm leading-snug mt-3 mb-1 first:mt-0">
+            {children}
+          </h2>
+        ),
+        h3: ({ children }) => (
+          <h3 className="font-semibold text-sm leading-snug mt-2 mb-1 first:mt-0">{children}</h3>
+        ),
+        code: ({ children, className }) => {
+          // Heuristic: fenced code blocks have a language className or multiline content
+          const src = String(children);
+          const isBlock = !!className || src.includes('\n');
+          if (isBlock) {
+            return (
+              <code className="text-xs font-mono leading-relaxed">{children}</code>
+            );
+          }
+          return (
+            <code className="bg-black/10 dark:bg-white/10 rounded px-1 py-0.5 text-xs font-mono">
+              {children}
+            </code>
+          );
+        },
+        pre: ({ children }) => (
+          <pre className="mb-2 last:mb-0 rounded-lg bg-black/10 dark:bg-white/10 px-3 py-2 overflow-x-auto text-xs font-mono leading-relaxed">
+            {children}
+          </pre>
+        ),
+        a: ({ href, children }) => (
+          <a
+            href={href}
+            className="text-secondary underline underline-offset-2 hover:no-underline"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {children}
+          </a>
+        ),
+        hr: () => <hr className="border-current opacity-20 my-3" />,
+        blockquote: ({ children }) => (
+          <blockquote className="border-l-2 border-current opacity-60 pl-3 italic mb-2 last:mb-0">
+            {children}
+          </blockquote>
+        ),
+      }}
+    >
+      {content}
+    </ReactMarkdown>
+  );
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function MessageBubble({ message }: { message: Message }) {
@@ -46,13 +127,17 @@ function MessageBubble({ message }: { message: Message }) {
     <div className={cn('flex', isUser ? 'justify-end' : 'justify-start')}>
       <div
         className={cn(
-          'max-w-[85%] rounded-xl px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap',
+          'max-w-[85%] rounded-xl px-3 py-2',
           isUser
-            ? 'bg-primary text-primary-foreground'
+            ? 'bg-primary text-primary-foreground text-sm leading-relaxed whitespace-pre-wrap'
             : 'bg-surface border border-border text-text-base dark:bg-slate-800 dark:border-slate-700',
         )}
       >
-        {message.content}
+        {isUser ? (
+          message.content
+        ) : (
+          <ChatMarkdown content={message.content} />
+        )}
         {message.isStreaming && message.content === '' && (
           <span className="inline-flex gap-1 items-center h-4">
             <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce [animation-delay:0ms]" />
@@ -61,7 +146,7 @@ function MessageBubble({ message }: { message: Message }) {
           </span>
         )}
         {message.isStreaming && message.content !== '' && (
-          <span className="inline-block w-1.5 h-3.5 ml-0.5 bg-current opacity-80 animate-pulse rounded-sm align-middle" />
+          <span className="inline-block w-1.5 h-3.5 ml-0.5 bg-text-base opacity-60 animate-pulse rounded-sm align-middle" />
         )}
       </div>
     </div>
