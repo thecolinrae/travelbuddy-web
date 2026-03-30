@@ -1,6 +1,5 @@
 'use client';
 
-import { useState } from 'react';
 import { CalendarDays, Route, UtensilsCrossed, List } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DayNav } from './day/DayNav';
@@ -27,6 +26,8 @@ interface DayTabProps {
   trip: TripSnapshot;
   timeline: TimelineEvent[];
   activities: Activity[];
+  currentIndex: number;
+  onIndexChange: (index: number) => void;
   onViewTimeline?: () => void;
 }
 
@@ -109,17 +110,8 @@ function renderItem(item: DayItem, isPast: boolean, isFirstFuture: boolean, nowT
   return <div className={wrapperClass}>{card}</div>;
 }
 
-export function DayTab({ trip, timeline, activities, onViewTimeline }: DayTabProps) {
+export function DayTab({ trip, timeline, activities, currentIndex, onIndexChange, onViewTimeline }: DayTabProps) {
   const days = buildDayRange(trip.startDate, trip.endDate, timeline, activities);
-
-  const [currentIndex, setCurrentIndex] = useState<number>(() => {
-    if (trip.status === 'active') {
-      const today = getToday();
-      const idx = days.indexOf(today);
-      if (idx !== -1) return idx;
-    }
-    return 0;
-  });
 
   if (days.length === 0) {
     return (
@@ -160,9 +152,9 @@ export function DayTab({ trip, timeline, activities, onViewTimeline }: DayTabPro
         currentIndex={currentIndex}
         tripStartDate={trip.startDate}
         showJumpToToday={showJumpToToday}
-        onPrev={() => setCurrentIndex((i) => Math.max(0, i - 1))}
-        onNext={() => setCurrentIndex((i) => Math.min(days.length - 1, i + 1))}
-        onJumpToToday={() => setCurrentIndex(days.indexOf(today))}
+        onPrev={() => onIndexChange(Math.max(0, currentIndex - 1))}
+        onNext={() => onIndexChange(Math.min(days.length - 1, currentIndex + 1))}
+        onJumpToToday={() => onIndexChange(days.indexOf(today))}
       />
 
       <div className="space-y-3">

@@ -6,6 +6,7 @@ import { Plane, MapPin, Upload, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Session } from 'next-auth';
 import Image from 'next/image';
+import { NotificationBell } from '@/components/NotificationBell';
 
 const NAV_ITEMS = [
   { href: '/', label: 'Trips', icon: MapPin },
@@ -45,6 +46,7 @@ export function AppNav({ session }: { session: Session }) {
               {label}
             </Link>
           ))}
+          <NotificationBell variant="sidebar" />
         </nav>
 
         {/* User */}
@@ -84,6 +86,7 @@ export function AppNav({ session }: { session: Session }) {
             {label}
           </Link>
         ))}
+        <NotificationBell variant="mobile" />
       </nav>
     </>
   );

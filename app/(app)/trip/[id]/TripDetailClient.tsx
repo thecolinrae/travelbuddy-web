@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -16,6 +16,7 @@ import {
 import { ShareModal } from '@/components/trip/ShareModal';
 import { TripEditModal } from '@/components/trip/TripEditModal';
 import { DayTab } from '@/components/trip/DayTab';
+import { buildDayRange } from '@/components/trip/day/utils';
 import { TimelineTab } from '@/components/trip/TimelineTab';
 import { FlightsTab } from '@/components/trip/FlightsTab';
 import { SpendTab } from '@/components/trip/SpendTab';
@@ -87,6 +88,19 @@ export function TripDetailClient({ trip, timeline, activities, artifacts, isOwne
   const router = useRouter();
   const TABS = buildTabs(trip.status);
   const [activeTab, setActiveTab] = useState<TabId>('day');
+
+  const days = useMemo(
+    () => buildDayRange(trip.startDate, trip.endDate, timeline, activities),
+    [trip.startDate, trip.endDate, timeline, activities],
+  );
+  const [dayIndex, setDayIndex] = useState<number>(() => {
+    if (trip.status === 'active') {
+      const today = new Date().toISOString().slice(0, 10);
+      const idx = days.indexOf(today);
+      if (idx !== -1) return idx;
+    }
+    return 0;
+  });
   const [shareOpen, setShareOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
@@ -244,6 +258,8 @@ export function TripDetailClient({ trip, timeline, activities, artifacts, isOwne
             trip={trip}
             timeline={timeline}
             activities={activities}
+            currentIndex={dayIndex}
+            onIndexChange={setDayIndex}
             onViewTimeline={() => setActiveTab('timeline')}
           />
         )}

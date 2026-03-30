@@ -8,6 +8,7 @@ import {
   CLAUDE_PARSE_CONCURRENCY,
   suggestActivities,
 } from '@/services/claude';
+import { submitActivityBatch } from '@/services/batch';
 import {
   buildTimeline,
   mergeTimelines,
@@ -264,15 +265,22 @@ export async function POST(request: Request) {
             const newDests = _uniqueDests.filter((d) => !coveredCities.has(d));
             if (newDests.length === 0) return;
 
-            const allNew: Activity[] = [];
-            for (const dest of newDests) {
-              const suggestions = await suggestActivities(dest, _startDate || '', _endDate || '');
-              allNew.push(...suggestions.map((a) => ({ ...a, city: dest, saved: true as const })));
+            // Submit as an async batch so results arrive via the notifications bell.
+            // Fall back to sequential inline generation if batch submission fails.
+            try {
+              await submitActivityBatch(_savedTripId, userId, newDests, _startDate || '', _endDate || '');
+            } catch {
+              // Fallback: generate sequentially (original behaviour)
+              const allNew: Activity[] = [];
+              for (const dest of newDests) {
+                const suggestions = await suggestActivities(dest, _startDate || '', _endDate || '');
+                allNew.push(...suggestions.map((a) => ({ ...a, city: dest, saved: true as const })));
+              }
+              await saveActivities(_savedTripId, _uniqueDests[0] ?? '', [
+                ...(existing?.savedActivities ?? []),
+                ...allNew,
+              ]);
             }
-            await saveActivities(_savedTripId, _uniqueDests[0] ?? '', [
-              ...(existing?.savedActivities ?? []),
-              ...allNew,
-            ]);
           } catch {
             // non-fatal — user can still manually refresh via the Activities tab
           }

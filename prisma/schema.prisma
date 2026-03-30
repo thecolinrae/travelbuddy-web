@@ -23,6 +23,8 @@ model Profile {
 
   trips             Trip[]
   receivedShares    TripShare[] @relation("SharedWithUser")
+  batchJobs         BatchJob[]
+  notifications     Notification[]
 }
 
 // ── Trip ─────────────────────────────────────────────────────────────────────
@@ -52,6 +54,8 @@ model Trip {
   activities        Activities?
   artifacts         Artifact[]
   shares            TripShare[]
+  batchJobs         BatchJob[]
+  notifications     Notification[]
 
   @@index([userId, createdAt(sort: Desc)])
 }
@@ -121,4 +125,43 @@ model TripShare {
   @@unique([tripId, sharedWithEmail])
   @@index([sharedWithEmail])
   @@index([sharedWithUserId])
+}
+
+// ── Async batch jobs (Anthropic Message Batches API) ─────────────────────────
+
+model BatchJob {
+  id               String         @id @default(cuid())
+  userId           String
+  tripId           String
+  anthropicBatchId String         @unique
+  status           String         @default("pending") // pending | processing | completed | failed
+  destinations     String[]
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  profile          Profile        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trip             Trip           @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  notifications    Notification[]
+
+  @@index([userId, status])
+  @@index([tripId])
+}
+
+// ── User notifications ────────────────────────────────────────────────────────
+
+model Notification {
+  id         String    @id @default(cuid())
+  userId     String
+  tripId     String
+  batchJobId String?
+  type       String                          // activities_generating | activities_ready
+  read       Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+
+  profile    Profile   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trip       Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  batchJob   BatchJob? @relation(fields: [batchJobId], references: [id])
+
+  @@index([userId, read])
+  @@index([tripId])
 }
