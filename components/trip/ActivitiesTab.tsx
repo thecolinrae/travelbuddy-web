@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2, Sparkles, Compass } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -150,6 +150,7 @@ export function ActivitiesTab({
 }: Props) {
   const router = useRouter();
   const [sortMode, setSortMode] = useState<SortMode>('city');
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [refreshing, setRefreshing] = useState(false);
   const [editingActivity, setEditingActivity] = useState<Activity | null>(null);
   const [schedulingActivity, setSchedulingActivity] = useState<Activity | null>(null);
@@ -163,6 +164,28 @@ export function ActivitiesTab({
       : sortMode === 'type'
       ? groupByType(saved)
       : sortByDate(saved);
+
+  // Reset collapse state whenever the sort mode changes
+  useEffect(() => { setCollapsedGroups(new Set()); }, [sortMode]);
+
+  const collapsibleGroups = groups.filter((g) => !!g.label);
+  const allCollapsed = collapsibleGroups.length > 0 && collapsibleGroups.every((g) => collapsedGroups.has(g.label));
+
+  function toggleGroup(label: string) {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      next.has(label) ? next.delete(label) : next.add(label);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    if (allCollapsed) {
+      setCollapsedGroups(new Set());
+    } else {
+      setCollapsedGroups(new Set(collapsibleGroups.map((g) => g.label)));
+    }
+  }
 
   // ── Persistence ─────────────────────────────────────────────────────────────
 
@@ -269,18 +292,28 @@ export function ActivitiesTab({
           ))}
         </div>
 
-        {isOwner && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleRefresh}
-            disabled={refreshing}
-            className="gap-1.5 ml-auto"
-          >
-            {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-            {refreshing ? 'Generating…' : 'Refresh'}
-          </Button>
-        )}
+        <div className="flex items-center gap-2 ml-auto">
+          {collapsibleGroups.length > 1 && (
+            <button
+              onClick={toggleAll}
+              className="text-xs text-text-muted hover:text-text-base transition-colors"
+            >
+              {allCollapsed ? 'Expand all' : 'Collapse all'}
+            </button>
+          )}
+          {isOwner && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="gap-1.5"
+            >
+              {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              {refreshing ? 'Generating…' : 'Refresh'}
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Empty state */}
@@ -308,6 +341,8 @@ export function ActivitiesTab({
               label={group.label}
               activities={group.items}
               isOwner={isOwner}
+              isCollapsed={collapsedGroups.has(group.label)}
+              onToggle={() => toggleGroup(group.label)}
               onEdit={setEditingActivity}
               onSchedule={setSchedulingActivity}
               confirmDelete={confirmDelete}
