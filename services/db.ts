@@ -144,11 +144,25 @@ export async function updateTripCoverPhoto(tripId: string, coverPhotoUrl: string
 // ─── Timeline ─────────────────────────────────────────────────────────────────
 
 export async function saveTimeline(tripId: string, events: TimelineEvent[]): Promise<void> {
-  // Delete + insert is simpler than upsert for a full timeline replacement
+  // Before deleting, snapshot existing legId assignments keyed by event id.
+  // This preserves user-assigned leg groupings through re-imports.
+  // Note: the DB row id is a Prisma cuid, but event.id is a nanoid stored in the
+  // data JSON — they differ. Key the map by data.id (the canonical event identity).
+  const existingRows = await prisma.timelineEvent.findMany({
+    where: { tripId },
+    select: { id: true, legId: true, data: true },
+  });
+  const legIdByEventId = new Map<string, string | null>(
+    existingRows.map((r) => [(r.data as { id?: string }).id ?? r.id, r.legId]),
+  );
+
   await prisma.$transaction([
     prisma.timelineEvent.deleteMany({ where: { tripId } }),
     prisma.timelineEvent.createMany({
       data: events.map((e) => ({
+        // Use the event's own id as the DB pk so all service lookups
+        // (splitLeg, assignEventToLeg, etc.) can match by event.id directly.
+        id: e.id,
         tripId,
         eventType: e.type,
         eventSubtype: 'subtype' in e ? (e as { subtype: string }).subtype : null,
@@ -156,6 +170,8 @@ export async function saveTimeline(tripId: string, events: TimelineEvent[]): Pro
         eventDate: e.date ?? null,
         sortUtc: e.utcISO ? new Date(e.utcISO) : null,
         journeyId: e.journeyId ?? null,
+        // Restore prior leg assignment; fall back to what's in the event data
+        legId: legIdByEventId.get(e.id) ?? e.legId ?? null,
         artifactSources: e.artifactSources ?? [],
       })),
     }),

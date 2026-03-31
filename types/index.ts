@@ -113,7 +113,18 @@ export interface BaseTimelineEvent {
   locationAddress?: string;
   artifactSources?: string[];
   journeyId?: string;
+  legId?: string;
   displayOrder?: number;
+}
+
+export interface TransportLeg {
+  id: string;
+  tripId: string;
+  name: string | null;
+  nameIsCustom: boolean;
+  order: number;
+  createdAt: string;
+  events?: TimelineEvent[];
 }
 
 export interface HotelCheckInEvent extends BaseTimelineEvent {

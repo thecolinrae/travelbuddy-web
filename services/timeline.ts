@@ -103,17 +103,53 @@ function makeCost(
 // ─── UTC normalisation ────────────────────────────────────────────────────────
 
 /**
- * When an event has both utcISO and timezone, derive date and time from them so
- * they are always consistent regardless of when the event was written to JSON.
- * Events without a known timezone are left untouched.
+ * Normalize a timeline event's UTC timestamp and timezone.
+ *
+ * For transport events (flights and other transport) the local time shown to the
+ * user is the authoritative value — it's what's printed on the ticket.  We
+ * therefore compute utcISO *from* the local date+time using a timezone resolved
+ * from the relevant location:
+ *   • departure events  → timezone of the departure airport / city
+ *   • arrival events    → timezone of the arrival airport / city
+ *
+ * This is more reliable than trusting UTC values provided by an LLM, which
+ * frequently gets offsets wrong for international flights.
+ *
+ * For all other event types (hotels, activities, etc.) that already have both
+ * utcISO and timezone stored, we re-derive local date+time from UTC to keep
+ * them consistent.
  */
 function normalizeEvent<T extends TimelineEvent>(e: T): T {
+  if (e.type === 'flight' && (e.subtype === 'departure' || e.subtype === 'arrival')) {
+    const locationStr = e.subtype === 'departure' ? e.departureAirport : e.arrivalAirport;
+    const tz = resolveTimezone(locationStr) ?? e.timezone ?? undefined;
+    if (tz && e.date && e.time) {
+      const computed = utcForEvent(e.date, e.time, tz);
+      if (computed) return { ...e, utcISO: computed, timezone: tz } as T;
+    }
+    if (tz && !e.timezone) return { ...e, timezone: tz } as T;
+    return e;
+  }
+
+  if (e.type === 'otherTransportation') {
+    const locationStr = e.subtype === 'departure' ? e.departureLocation : e.arrivalLocation;
+    const tz = resolveTimezone(locationStr) ?? e.timezone ?? undefined;
+    if (tz && e.date && e.time) {
+      const computed = utcForEvent(e.date, e.time, tz);
+      if (computed) return { ...e, utcISO: computed, timezone: tz } as T;
+    }
+    if (tz && !e.timezone) return { ...e, timezone: tz } as T;
+    return e;
+  }
+
+  // For all other event types: if utcISO + timezone are present, re-derive
+  // local date/time from UTC so they are always consistent.
   if (!e.utcISO || !e.timezone) return e;
   return {
     ...e,
     date: utcToLocalDate(e.utcISO, e.timezone),
     time: utcToLocalTime(e.utcISO, e.timezone),
-  };
+  } as T;
 }
 
 /**
@@ -466,13 +502,25 @@ function extractEvents(
         const depAirport = leg.origin ?? artifact.origin ?? '?';
         const arrAirport = leg.destination ?? artifact.destination ?? '?';
 
+        // Always resolve timezone from the airport/city rather than trusting the
+        // LLM-provided UTC values — LLMs frequently get timezone offsets wrong,
+        // especially for international flights and date-line crossings.
+        const depTz = resolveTimezone(depAirport) ?? undefined;
+        const arrTz = resolveTimezone(arrAirport) ?? undefined;
+
+        // Compute UTC from the ticket's local time + location timezone.
+        // Fall back to the LLM-provided value only when the timezone is unknown.
+        const depUtcISO = depTz
+          ? (utcForEvent(leg.departureDate, leg.departureTime, depTz) ?? leg.departureUtc)
+          : leg.departureUtc;
+
         const dep: FlightDepartureEvent = {
           id: depIds[li],
           type: 'flight', subtype: 'departure',
           date: leg.departureDate,
           time: leg.departureTime,
-          utcISO: leg.departureUtc,
-          timezone: resolveTimezone(depAirport) ?? undefined,
+          utcISO: depUtcISO,
+          timezone: depTz,
           locationCity: stripAirportCode(depAirport) || depAirport,
           flightNo: leg.flightNumber ?? artifact.flightNumber ?? '',
           departureAirport: depAirport,
@@ -507,13 +555,18 @@ function extractEvents(
           // This arrival is a connection stop if it is NOT the primary destination AND
           // there is a subsequent departure in the same booking.
           const isConnection = !!nextDepId && !!primaryDest && !airportsMatch(arrAirport, primaryDest);
+
+          const arrUtcISO = arrTz
+            ? (utcForEvent(leg.arrivalDate, leg.arrivalTime, arrTz) ?? leg.arrivalUtc)
+            : leg.arrivalUtc;
+
           const arr: FlightArrivalEvent = {
             id: nanoid(),
             type: 'flight', subtype: 'arrival',
             date: leg.arrivalDate,
             time: leg.arrivalTime,
-            utcISO: leg.arrivalUtc,
-            timezone: resolveTimezone(arrAirport) ?? undefined,
+            utcISO: arrUtcISO,
+            timezone: arrTz,
             locationCity: stripAirportCode(arrAirport) || arrAirport,
             flightNo: leg.flightNumber ?? artifact.flightNumber ?? '',
             departureAirport: depAirport,
@@ -523,16 +576,6 @@ function extractEvents(
             journeyId,
             connectingFlight: isConnection ? nextDepId : undefined,
           };
-
-          // Sanity-check: arrivalUtc must be strictly after departureUtc.
-          // If Claude's UTC values are missing or inverted (common for eastbound
-          // date-line crossings), recompute both from local time + IANA timezone.
-          const depUtcMs = dep.utcISO ? new Date(dep.utcISO).getTime() : NaN;
-          const arrUtcMs = arr.utcISO ? new Date(arr.utcISO).getTime() : NaN;
-          if (isNaN(depUtcMs) || isNaN(arrUtcMs) || arrUtcMs <= depUtcMs) {
-            dep.utcISO = utcForEvent(dep.date, dep.time, dep.timezone) ?? dep.utcISO;
-            arr.utcISO = utcForEvent(arr.date, arr.time, arr.timezone) ?? arr.utcISO;
-          }
 
           events.push(arr);
         }

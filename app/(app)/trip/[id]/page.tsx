@@ -1,5 +1,6 @@
 import { auth } from '@/lib/auth';
 import { getTrip, loadTimeline, loadActivities, listArtifacts } from '@/services/db';
+import { listLegs } from '@/services/legs';
 import { redirect } from 'next/navigation';
 import { TripDetailClient } from './TripDetailClient';
 
@@ -12,10 +13,11 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
   const trip = await getTrip(id, userId);
   if (!trip) redirect('/');
 
-  const [timeline, activitiesData, artifacts] = await Promise.all([
+  const [timeline, activitiesData, artifacts, legRows] = await Promise.all([
     loadTimeline(id),
     loadActivities(id),
     listArtifacts(id),
+    listLegs(id),
   ]);
 
   // Serialize for client component (convert Date/BigInt → primitives)
@@ -45,10 +47,13 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
     createdAt: a.createdAt.toISOString(),
   }));
 
+  const legs = legRows.map((l) => ({ id: l.id, name: l.name }));
+
   return (
     <TripDetailClient
       trip={tripData}
       timeline={timeline}
+      legs={legs}
       activities={activitiesData?.savedActivities ?? []}
       artifacts={artifactData}
       isOwner={trip.userId === userId}

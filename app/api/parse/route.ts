@@ -27,6 +27,7 @@ import {
   getTrip,
   updateTripCoverPhoto,
 } from '@/services/db';
+import { autoCreateLegs } from '@/services/legs';
 import { uploadArtifact } from '@/services/storage';
 import { fetchDestinationPhoto } from '@/services/photos';
 import type { ParsedArtifact, Activity } from '@/types';
@@ -212,6 +213,13 @@ export async function POST(request: Request) {
         }
 
         await saveTimeline(savedTripId, timeline);
+
+        // Auto-create transport legs for any new journeyId groups (non-fatal)
+        try {
+          await autoCreateLegs(savedTripId);
+        } catch {
+          // Leg creation failure is not fatal — legs can be created manually
+        }
 
         // Upload files to S3 (non-fatal — failures don't break the import)
         for (const { name, type, buffer } of fileBuffers) {

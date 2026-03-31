@@ -78,10 +78,28 @@ export function buildDayRange(
 
 // ─── buildDayItems ────────────────────────────────────────────────────────────
 
-function getItemTime(item: DayItem): string | undefined {
-  if (item.kind === 'now') return undefined;
-  if (item.kind === 'activity') return item.activity.scheduledTime;
-  return item.event.time;
+/**
+ * Return a sort key in epoch milliseconds for a DayItem.
+ *
+ * Priority:
+ *  1. event.utcISO — true UTC timestamp, most accurate
+ *  2. event.date + event.time — local datetime, parsed in the browser's timezone
+ *  3. activity.scheduledDate + scheduledTime — local datetime
+ *  4. Infinity — no time info, sort to end
+ */
+function getItemSortMs(item: DayItem): number {
+  if (item.kind === 'now') return -Infinity;
+  if (item.kind === 'activity') {
+    const a = item.activity;
+    if (a.scheduledDate && a.scheduledTime) return new Date(`${a.scheduledDate}T${a.scheduledTime}`).getTime();
+    if (a.scheduledDate) return new Date(`${a.scheduledDate}T23:59:59`).getTime();
+    return Infinity;
+  }
+  const e = item.event;
+  if (e.utcISO) return new Date(e.utcISO).getTime();
+  if (e.date && e.time) return new Date(`${e.date}T${e.time}`).getTime();
+  if (e.date) return new Date(`${e.date}T23:59:59`).getTime();
+  return Infinity;
 }
 
 export function buildDayItems(
@@ -103,22 +121,16 @@ export function buildDayItems(
     }
   }
 
-  return items.sort((a, b) => {
-    const tA = getItemTime(a);
-    const tB = getItemTime(b);
-    if (!tA && !tB) return 0;
-    if (!tA) return 1;
-    if (!tB) return -1;
-    return tA.localeCompare(tB);
-  });
+  return items.sort((a, b) => getItemSortMs(a) - getItemSortMs(b));
 }
 
 // ─── injectNowIndicator ───────────────────────────────────────────────────────
 
 export function injectNowIndicator(items: DayItem[], nowTime: string): DayItem[] {
+  const nowMs = Date.now();
   const insertAt = items.findIndex((item) => {
-    const t = getItemTime(item);
-    return t !== undefined && t > nowTime;
+    const ms = getItemSortMs(item);
+    return ms !== Infinity && ms > nowMs;
   });
   const result = [...items];
   if (insertAt === -1) {

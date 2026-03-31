@@ -262,15 +262,27 @@ export function TimelineTab({ tripId, timeline, activities, isOwner }: Props) {
           const events = byDate.get(date) ?? [];
           const dayActivities = activitiesByDate.get(date) ?? [];
 
-          // Build merged items sorted by time (no time → end of list)
-          type EventItem = { kind: 'event'; data: TimelineEvent; time: string };
-          type ActivityItem = { kind: 'activity'; data: Activity; time: string };
+          // Build merged items sorted by UTC time when available, local time otherwise.
+          type EventItem = { kind: 'event'; data: TimelineEvent; sortMs: number };
+          type ActivityItem = { kind: 'activity'; data: Activity; sortMs: number };
           type MergedItem = EventItem | ActivityItem;
 
+          function eventSortMs(e: TimelineEvent): number {
+            if (e.utcISO) return new Date(e.utcISO).getTime();
+            if (e.date && e.time) return new Date(`${e.date}T${e.time}`).getTime();
+            if (e.date) return new Date(`${e.date}T23:59:59`).getTime();
+            return Number.MAX_SAFE_INTEGER;
+          }
+          function activitySortMs(a: Activity): number {
+            if (a.scheduledDate && a.scheduledTime) return new Date(`${a.scheduledDate}T${a.scheduledTime}`).getTime();
+            if (a.scheduledDate) return new Date(`${a.scheduledDate}T23:59:59`).getTime();
+            return Number.MAX_SAFE_INTEGER;
+          }
+
           const merged: MergedItem[] = [
-            ...events.map((e) => ({ kind: 'event' as const, data: e, time: e.time ?? '99:99' })),
-            ...dayActivities.map((a) => ({ kind: 'activity' as const, data: a, time: a.scheduledTime ?? '99:99' })),
-          ].sort((a, b) => a.time.localeCompare(b.time));
+            ...events.map((e) => ({ kind: 'event' as const, data: e, sortMs: eventSortMs(e) })),
+            ...dayActivities.map((a) => ({ kind: 'activity' as const, data: a, sortMs: activitySortMs(a) })),
+          ].sort((a, b) => a.sortMs - b.sortMs);
 
           return (
             <div key={date}>

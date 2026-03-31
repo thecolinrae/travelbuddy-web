@@ -51,6 +51,7 @@ model Trip {
 
   profile           Profile   @relation(fields: [userId], references: [id], onDelete: Cascade)
   timelineEvents    TimelineEvent[]
+  transportLegs     TransportLeg[]
   activities        Activities?
   artifacts         Artifact[]
   shares            TripShare[]
@@ -71,6 +72,7 @@ model TimelineEvent {
   eventDate       String?                       // YYYY-MM-DD for date-based indexing
   sortUtc         DateTime?                     // accurate chronological ordering
   journeyId       String?                       // groups dep+arr events from the same flight booking
+  legId           String?                       // user-defined transport leg (soft ref to TransportLeg.id)
   artifactSources String[]  @default([])
   createdAt       DateTime  @default(now())
 
@@ -79,6 +81,22 @@ model TimelineEvent {
   @@index([tripId, eventDate])
   @@index([tripId, sortUtc])
   @@index([tripId, journeyId])
+  @@index([tripId, legId])
+}
+
+// ── Transport legs (user-defined groupings of transport events) ───────────────
+
+model TransportLeg {
+  id            String   @id @default(cuid())
+  tripId        String
+  name          String?                         // auto-generated or user-set, e.g. "AUS → NRT"
+  nameIsCustom  Boolean  @default(false)        // true when user has manually renamed
+  order         Int                             // display order within the trip
+  createdAt     DateTime @default(now())
+
+  trip          Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([tripId, order])
 }
 
 // ── Activities (suggestions + saved) ────────────────────────────────────────

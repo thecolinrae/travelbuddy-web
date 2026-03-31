@@ -1,5 +1,6 @@
 'use client';
 
+import React from 'react';
 import { CalendarDays, Route, UtensilsCrossed, List } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DayNav } from './day/DayNav';
@@ -22,11 +23,17 @@ interface TripSnapshot {
   status: string;
 }
 
+export interface LegSummary {
+  id: string;
+  name: string | null;
+}
+
 interface DayTabProps {
   trip: TripSnapshot;
   tripId: string;
   timeline: TimelineEvent[];
   activities: Activity[];
+  legs?: LegSummary[];
   isOwner: boolean;
   currentIndex: number;
   onIndexChange: (index: number) => void;
@@ -134,7 +141,61 @@ function renderItem(
   return <div className={wrapperClass}>{card}</div>;
 }
 
-export function DayTab({ trip, tripId, timeline, activities, isOwner, currentIndex, onIndexChange, onViewTimeline, onActivityUpdate }: DayTabProps) {
+// ─── Leg grouping ─────────────────────────────────────────────────────────────
+
+interface ItemWithIdx { item: DayItem; idx: number }
+type RenderSegment =
+  | { kind: 'solo'; entry: ItemWithIdx }
+  | { kind: 'leg-group'; legId: string; legName: string; entries: ItemWithIdx[] };
+
+/**
+ * Group consecutive transport events that share the same named legId into a
+ * single segment. Everything else (activities, hotels, the now indicator, and
+ * transport events with no leg name) is emitted as a solo segment.
+ */
+function buildSegments(items: DayItem[], legNameById: Map<string, string | null>): RenderSegment[] {
+  const segments: RenderSegment[] = [];
+  let i = 0;
+  while (i < items.length) {
+    const item = items[i];
+    const legId =
+      item.kind === 'timeline' &&
+      (item.event.type === 'flight' || item.event.type === 'otherTransportation') &&
+      item.event.legId
+        ? item.event.legId
+        : null;
+    const legName = legId ? (legNameById.get(legId) ?? null) : null;
+
+    if (legId && legName) {
+      const entries: ItemWithIdx[] = [{ item, idx: i }];
+      let j = i + 1;
+      while (j < items.length) {
+        const next = items[j];
+        const matches =
+          next.kind === 'timeline' &&
+          (next.event.type === 'flight' || next.event.type === 'otherTransportation') &&
+          next.event.legId === legId;
+        if (!matches) break;
+        entries.push({ item: next, idx: j });
+        j++;
+      }
+      segments.push({ kind: 'leg-group', legId, legName, entries });
+      i = j;
+    } else {
+      segments.push({ kind: 'solo', entry: { item, idx: i } });
+      i++;
+    }
+  }
+  return segments;
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
+export function DayTab({ trip, tripId, timeline, activities, legs, isOwner, currentIndex, onIndexChange, onViewTimeline, onActivityUpdate }: DayTabProps) {
+  // Build a map of legId → leg name for grouping transport events
+  const legNameById = new Map<string, string | null>(
+    (legs ?? []).map((l) => [l.id, l.name]),
+  );
   const days = buildDayRange(trip.startDate, trip.endDate, timeline, activities);
 
   if (days.length === 0) {
@@ -169,6 +230,8 @@ export function DayTab({ trip, tripId, timeline, activities, isOwner, currentInd
   const contentItems = items.filter((i) => i.kind !== 'now');
   const isEmpty = contentItems.length === 0;
 
+  const segments = buildSegments(items, legNameById);
+
   return (
     <div className="space-y-4">
       <DayNav
@@ -184,23 +247,45 @@ export function DayTab({ trip, tripId, timeline, activities, isOwner, currentInd
       <div className="space-y-3">
         {isEmpty ? (
           <EmptyDayState />
-        ) : (
-          items.map((item, idx) => {
+        ) : segments.map((seg) => {
+          if (seg.kind === 'solo') {
+            const { item, idx } = seg.entry;
             const isPast = isToday && nowIndex !== -1 && idx < nowIndex;
             const isFirstFuture = isToday && idx === firstFutureIndex;
             const key =
-              item.kind === 'now'
-                ? 'now'
-                : item.kind === 'activity'
-                ? item.activity.id
-                : item.event.id;
+              item.kind === 'now' ? 'now'
+              : item.kind === 'activity' ? item.activity.id
+              : item.event.id;
             return (
               <div key={key}>
                 {renderItem(item, isPast, isFirstFuture, nowTime, { tripId, activities, isOwner, onActivityUpdate })}
               </div>
             );
-          })
-        )}
+          }
+
+          // Leg group: render a named header + visually grouped events
+          const allPast = isToday && nowIndex !== -1 && seg.entries.every(({ idx }) => idx < nowIndex);
+          const isMulti = seg.entries.length > 1;
+          return (
+            <div key={`leg-${seg.legId}`} className={allPast ? 'opacity-60' : ''}>
+              <p className="text-xs font-medium text-text-muted uppercase tracking-wide pb-1.5">
+                {seg.legName}
+              </p>
+              <div className={isMulti ? 'pl-3 border-l-2 border-secondary/30 space-y-2' : ''}>
+                {seg.entries.map(({ item, idx }) => {
+                  const isPast = isToday && nowIndex !== -1 && idx < nowIndex;
+                  const isFirstFuture = isToday && idx === firstFutureIndex;
+                  const key = item.kind === 'activity' ? item.activity.id : (item.kind === 'timeline' ? item.event.id : 'now');
+                  return (
+                    <div key={key}>
+                      {renderItem(item, false, isFirstFuture, nowTime, { tripId, activities, isOwner, onActivityUpdate })}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {onViewTimeline && (

@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
-import { ArrowLeft, Plus, Share2, Pencil, Trash2, MessageCircle } from 'lucide-react';
+import { ArrowLeft, Plus, Share2, Pencil, Trash2, MessageCircle, Route } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -18,7 +18,6 @@ import { TripEditModal } from '@/components/trip/TripEditModal';
 import { DayTab } from '@/components/trip/DayTab';
 import { buildDayRange } from '@/components/trip/day/utils';
 import { TimelineTab } from '@/components/trip/TimelineTab';
-import { FlightsTab } from '@/components/trip/FlightsTab';
 import { SpendTab } from '@/components/trip/SpendTab';
 import { MapTab } from '@/components/trip/MapTab';
 import { ActivitiesTab } from '@/components/trip/ActivitiesTab';
@@ -27,11 +26,11 @@ import { NotesTab } from '@/components/trip/NotesTab';
 import { TripChatPanel } from '@/components/trip/TripChatPanel';
 import type { ArtifactInfo } from '@/components/trip/DocumentsTab';
 import type { TimelineEvent, Activity, BudgetItemCategory } from '@/types';
+import type { LegSummary } from '@/components/trip/DayTab';
 
 type TabId =
   | 'day'
   | 'timeline'
-  | 'flights'
   | 'spend'
   | 'map'
   | 'activities'
@@ -41,7 +40,6 @@ type TabId =
 function buildTabs(status: string) {
   return [
     { id: 'day' as const,         label: status === 'active' ? 'Today' : 'Day' },
-    { id: 'flights' as const,     label: 'Flights'     },
     { id: 'spend' as const,       label: 'Spend'       },
     { id: 'map' as const,         label: 'Map'         },
     { id: 'activities' as const,  label: 'Activities'  },
@@ -70,6 +68,7 @@ interface TripData {
 interface Props {
   trip: TripData;
   timeline: TimelineEvent[];
+  legs: LegSummary[];
   activities: Activity[];
   artifacts: ArtifactInfo[];
   isOwner: boolean;
@@ -85,7 +84,7 @@ function formatDateRange(start: string | null, end: string | null): string {
   return fmt((start ?? end)!);
 }
 
-export function TripDetailClient({ trip, timeline, activities: initialActivities, artifacts, isOwner }: Props) {
+export function TripDetailClient({ trip, timeline, legs, activities: initialActivities, artifacts, isOwner }: Props) {
   const router = useRouter();
   const TABS = buildTabs(trip.status);
   const [activeTab, setActiveTab] = useState<TabId>('day');
@@ -119,9 +118,9 @@ export function TripDetailClient({ trip, timeline, activities: initialActivities
 
   const dateRange = formatDateRange(trip.startDate, trip.endDate);
 
-  const flightCount = timeline.filter(
-    (e) => e.type === 'flight' && e.subtype === 'departure',
-  ).length;
+  const hasTransport = timeline.some(
+    (e) => e.type === 'flight' || e.type === 'otherTransportation',
+  );
 
   function handleActivityMutation() {
     router.refresh();
@@ -192,6 +191,19 @@ export function TripDetailClient({ trip, timeline, activities: initialActivities
               Share
             </Button>
           )}
+          {hasTransport && (
+            <Button
+              asChild
+              size="sm"
+              variant="ghost"
+              className="gap-1.5 text-white/90 hover:text-white hover:bg-white/15 border border-white/20"
+            >
+              <Link href={`/trip/${trip.id}/transport`}>
+                <Route className="h-4 w-4" />
+                Transport
+              </Link>
+            </Button>
+          )}
           <Button
             asChild
             size="sm"
@@ -245,11 +257,6 @@ export function TripDetailClient({ trip, timeline, activities: initialActivities
                 ].join(' ')}
               >
                 {tab.label}
-                {tab.id === 'flights' && flightCount > 0 && (
-                  <span className="ml-1.5 text-xs bg-muted rounded-full px-1.5 py-0.5">
-                    {flightCount}
-                  </span>
-                )}
                 {tab.id === 'documents' && artifacts.length > 0 && (
                   <span className="ml-1.5 text-xs bg-muted rounded-full px-1.5 py-0.5">
                     {artifacts.length}
@@ -269,6 +276,7 @@ export function TripDetailClient({ trip, timeline, activities: initialActivities
             tripId={trip.id}
             timeline={timeline}
             activities={activities}
+            legs={legs}
             isOwner={isOwner}
             currentIndex={dayIndex}
             onIndexChange={setDayIndex}
@@ -293,7 +301,6 @@ export function TripDetailClient({ trip, timeline, activities: initialActivities
             />
           </div>
         )}
-        {activeTab === 'flights' && <FlightsTab timeline={timeline} />}
         {activeTab === 'spend' && (
           <SpendTab
             tripId={trip.id}
