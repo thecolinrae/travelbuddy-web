@@ -151,6 +151,13 @@ export function EventFormModal({ tripId, open, onClose, onSaved, editing, transp
       : transportPrefill?.journeyId
         ? { journeyId: transportPrefill.journeyId }
         : {};
+
+    // If the user changed date or time, the stored utcISO is no longer valid.
+    // Clear it so sorting falls back to the new local date+time instead of the old UTC value.
+    if (editing && (date !== editing.date || (time || '') !== (editing.time || ''))) {
+      delete (base as Partial<TimelineEvent>).utcISO;
+    }
+
     const common = { date, time: time || undefined, locationCity };
 
     if (formType === 'flightDep') {

@@ -1,8 +1,8 @@
 /**
  * Destination cover photo service.
  *
- * Backed by the Wikipedia Pageimages API (no API key required).
- * Returns stable upload.wikimedia.org CDN URLs.
+ * Backed by the Unsplash API. Requires UNSPLASH_ACCESS_KEY in the environment.
+ * Returns images.unsplash.com CDN URLs.
  *
  * Server-side only — never import in client components.
  */
@@ -10,40 +10,31 @@
 /**
  * Fetch a high-quality cover photo URL for a destination.
  *
- * Returns an upload.wikimedia.org CDN URL, or null if the
- * destination could not be found or has no associated image.
- * upload.wikimedia.org is already in next.config.ts remotePatterns.
+ * Returns an images.unsplash.com URL, or null if the destination
+ * could not be found or UNSPLASH_ACCESS_KEY is not set.
+ * images.unsplash.com is already in next.config.ts remotePatterns.
  */
 export async function fetchDestinationPhoto(destination: string): Promise<string | null> {
-  if (!destination.trim()) return null;
+  const accessKey = process.env.UNSPLASH_ACCESS_KEY;
+  if (!accessKey || !destination.trim()) return null;
 
   try {
     const url =
-      `https://en.wikipedia.org/w/api.php` +
-      `?action=query` +
-      `&titles=${encodeURIComponent(destination)}` +
-      `&prop=pageimages` +
-      `&format=json` +
-      `&pithumbsize=1200` +
-      `&pilicense=any`;
+      `https://api.unsplash.com/search/photos` +
+      `?query=${encodeURIComponent(destination)}` +
+      `&orientation=landscape` +
+      `&per_page=1`;
 
     const res = await fetch(url, {
-      headers: { 'User-Agent': 'TravelBuddy/1.0 (travel planning app)' },
+      headers: { Authorization: `Client-ID ${accessKey}` },
     });
     if (!res.ok) return null;
 
     const data = (await res.json()) as {
-      query?: {
-        pages?: Record<string, { thumbnail?: { source: string } }>;
-      };
+      results?: Array<{ urls?: { regular?: string } }>;
     };
 
-    const pages = data.query?.pages;
-    if (!pages) return null;
-
-    // Wikipedia returns a single page object keyed by page ID
-    const page = Object.values(pages)[0];
-    return page?.thumbnail?.source ?? null;
+    return data.results?.[0]?.urls?.regular ?? null;
   } catch {
     return null; // non-fatal — trips work fine without a cover photo
   }
