@@ -1,0 +1,40 @@
+name: TravelBuddy
+version: "1.0.0"
+slug: travelbuddy
+description: AI-powered travel planning and itinerary management
+url: https://github.com/thecolinrae/travelbuddy-web
+arch:
+  - amd64
+  - aarch64
+ports:
+  80/tcp: 80
+  443/tcp: 443
+ports_description:
+  80/tcp: HTTP (redirects to HTTPS)
+  443/tcp: HTTPS with Let's Encrypt
+map:
+  - data:rw
+startup: application
+boot: auto
+options:
+  domain: "travelbuddy.example.com"
+  nextauth_secret: ""
+  google_client_id: ""
+  google_client_secret: ""
+  anthropic_api_key: ""
+  unsplash_access_key: ""
+  google_maps_api_key: ""
+  postgres_password: ""
+  s3_access_key: "travelbuddy"
+  s3_secret_key: ""
+schema:
+  domain: str
+  nextauth_secret: str
+  google_client_id: str
+  google_client_secret: str
+  anthropic_api_key: str
+  unsplash_access_key: str?
+  google_maps_api_key: str?
+  postgres_password: str
+  s3_access_key: str
+  s3_secret_key: str
