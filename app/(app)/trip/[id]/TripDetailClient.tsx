@@ -386,7 +386,7 @@ export function TripDetailClient({ trip, timeline, legs, activities: initialActi
       <button
         onClick={() => setChatOpen(true)}
         aria-label="Open trip assistant"
-        className="fixed bottom-6 right-6 z-20 flex h-14 w-14 items-center justify-center
+        className="fixed bottom-20 right-6 z-20 flex h-14 w-14 items-center justify-center md:bottom-6
                    rounded-full bg-primary text-primary-foreground shadow-lg
                    hover:bg-primary-dark transition-colors focus:outline-none
                    focus:ring-2 focus:ring-primary focus:ring-offset-2"
