@@ -1,8 +1,8 @@
 # TravelBuddy — Caddy reverse proxy configuration
-# Replace yourdomain.com with your actual domain.
+# Domain: travelbuddy.screwball.ca
 # Caddy automatically provisions and renews TLS certificates via Let's Encrypt.
 
-yourdomain.com {
+travelbuddy.screwball.ca {
     reverse_proxy web:3000
 
     # Security headers
