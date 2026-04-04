@@ -30,12 +30,14 @@ import {
 import { autoCreateLegs } from '@/services/legs';
 import { uploadArtifact } from '@/services/storage';
 import { fetchDestinationPhoto } from '@/services/photos';
-import type { ParsedArtifact, Activity } from '@/types';
+import { filterOpenPlaces } from '@/services/places';
+import type { ParsedArtifact, Activity, ImportWarning } from '@/types';
+import { validateImportedTimeline } from '@/services/importWarnings';
 import type { GmailMessage } from '@/services/gmail';
 
 type ProgressEvent =
   | { type: 'progress'; step: string; completed: number; total: number }
-  | { type: 'done'; tripId: string }
+  | { type: 'done'; tripId: string; warnings: ImportWarning[] }
   | { type: 'error'; message: string };
 
 type ParseTask =
@@ -83,6 +85,7 @@ export async function POST(request: Request) {
         send({ type: 'progress', step: 'Starting…', completed: 0, total });
 
         const allArtifacts: ParsedArtifact[] = [];
+        const allSourceLabels: string[] = [];  // parallel to allArtifacts
         let suggestedName = '';
         const allDestinations: string[] = [];
         let overallStartDate = '';
@@ -128,10 +131,23 @@ export async function POST(request: Request) {
           CLAUDE_PARSE_CONCURRENCY,
         );
 
-        for (const result of results) {
+        for (let i = 0; i < results.length; i++) {
+          const result = results[i];
+          const task = tasks[i];
+          const label =
+            task.kind === 'email'
+              ? task.email.subject.slice(0, 50)
+              : task.kind === 'file'
+                ? task.file.name
+                : `Pasted text ${task.index + 1}`;
           if (result.status === 'fulfilled') {
             const r = result.value;
-            if (r.artifacts?.length) allArtifacts.push(...r.artifacts);
+            if (r.artifacts?.length) {
+              for (const artifact of r.artifacts) {
+                allArtifacts.push(artifact);
+                allSourceLabels.push(label);
+              }
+            }
             if (!suggestedName && r.suggestedTripName) suggestedName = r.suggestedTripName;
             if (r.destinations?.length) allDestinations.push(...r.destinations);
             else if (r.primaryDestination) allDestinations.push(r.primaryDestination);
@@ -254,7 +270,8 @@ export async function POST(request: Request) {
           }
         }
 
-        send({ type: 'done', tripId: savedTripId });
+        const importWarnings = validateImportedTimeline(timeline, allArtifacts, allSourceLabels);
+        send({ type: 'done', tripId: savedTripId, warnings: importWarnings });
 
         // Auto-generate activity recommendations for new destinations in the background.
         // Runs after the SSE response is closed so the user is not waiting.
@@ -282,7 +299,8 @@ export async function POST(request: Request) {
               const allNew: Activity[] = [];
               for (const dest of newDests) {
                 const suggestions = await suggestActivities(dest, _startDate || '', _endDate || '');
-                allNew.push(...suggestions.map((a) => ({ ...a, city: dest, saved: true as const })));
+                const verified = await filterOpenPlaces(suggestions, dest);
+                allNew.push(...verified.map((a) => ({ ...a, city: dest, saved: true as const })));
               }
               await saveActivities(_savedTripId, _uniqueDests[0] ?? '', [
                 ...(existing?.savedActivities ?? []),

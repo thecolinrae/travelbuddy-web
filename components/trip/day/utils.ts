@@ -19,6 +19,40 @@ export function fmt12(time?: string): string {
   return `${h12}:${m} ${suffix}`;
 }
 
+// ─── fmtUtc ───────────────────────────────────────────────────────────────────
+
+/** Format a UTC ISO string as "MMM D HH:MM UTC" for subtle display. */
+export function fmtUtc(utcISO?: string): string {
+  if (!utcISO) return '';
+  const d = new Date(utcISO);
+  const month = d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
+  const day = d.getUTCDate();
+  const h = d.getUTCHours().toString().padStart(2, '0');
+  const m = d.getUTCMinutes().toString().padStart(2, '0');
+  return `${month} ${day} ${h}:${m} UTC`;
+}
+
+// ─── tzAbbr ───────────────────────────────────────────────────────────────────
+
+/**
+ * Return a short timezone label (e.g. "EST", "JST", "AEDT") from an IANA
+ * timezone name and a local date string (YYYY-MM-DD).
+ * Returns empty string if the timezone is unknown or Intl is unavailable.
+ */
+export function tzAbbr(timezone?: string, localDate?: string): string {
+  if (!timezone) return '';
+  try {
+    const date = localDate ? new Date(localDate + 'T12:00:00') : new Date();
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      timeZoneName: 'short',
+    }).formatToParts(date);
+    return parts.find((p) => p.type === 'timeZoneName')?.value ?? '';
+  } catch {
+    return '';
+  }
+}
+
 // ─── formatDayLabel ───────────────────────────────────────────────────────────
 
 export function formatDayLabel(date: string, tripStartDate: string | null): string {

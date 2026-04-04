@@ -9,7 +9,7 @@ import {
   Bus, Train, Ship, Car, Navigation,
   Receipt,
 } from 'lucide-react';
-import { fmt12 } from '@/components/trip/day/utils';
+import { fmt12, fmtUtc, tzAbbr } from '@/components/trip/day/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { CategoryIcon } from '@/components/trip/activityIcons';
@@ -362,7 +362,11 @@ export function TimelineTab({ tripId, timeline, activities, isOwner }: Props) {
                         <p className="text-sm font-medium">{eventHeadline(e)}</p>
                         <div className="flex flex-wrap gap-x-3 mt-0.5">
                           {e.time && (
-                            <span className="text-xs text-muted-foreground">{fmt12(e.time)}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {fmt12(e.time)}
+                              {tzAbbr(e.timezone, e.date) && ` · ${tzAbbr(e.timezone, e.date)}`}
+                              {e.utcISO && ` · ${fmtUtc(e.utcISO)}`}
+                            </span>
                           )}
                           {e.locationCity && (
                             <span className="text-xs text-muted-foreground">{e.locationCity}</span>

@@ -181,8 +181,10 @@ export function LegCard({
         <p className="type-caption text-text-muted py-2">No events in this leg.</p>
       ) : (
         <div className="space-y-0">
-          {leg.events.map((event, idx) => {
-            const next = leg.events[idx + 1];
+          {[...leg.events]
+            .sort((a, b) => (a.utcISO ?? a.date ?? '').localeCompare(b.utcISO ?? b.date ?? ''))
+            .map((event, idx, sorted) => {
+            const next = sorted[idx + 1];
             const gap = next ? formatGap(eventEndUtc(event), eventEndUtc(next)) : null;
 
             return (

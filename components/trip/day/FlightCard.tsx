@@ -6,7 +6,7 @@ import {
   ArrowRight, ShieldAlert, Stamp, Armchair, Info,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { fmt12 } from './utils';
+import { fmt12, fmtUtc, tzAbbr } from './utils';
 import { EventDetailSheet } from './EventDetailSheet';
 import type { FlightDepartureEvent, FlightArrivalEvent, FlightConnectionEvent } from '@/types';
 
@@ -58,9 +58,12 @@ function DeparturCard({ event }: { event: FlightDepartureEvent }) {
 
         {/* Departure time + boarding */}
         <div className="flex items-end justify-between gap-4">
-          <p className="text-2xl font-bold text-text-base tabular-nums">
-            {fmt12(event.time)}
-          </p>
+          <div>
+            <p className="text-2xl font-bold text-text-base tabular-nums">{fmt12(event.time)}</p>
+            <p className="text-xs text-text-muted">
+              {tzAbbr(event.timezone, event.date)}{event.utcISO ? ` · ${fmtUtc(event.utcISO)}` : ''}
+            </p>
+          </div>
           {event.boardingTime && (
             <p className="text-sm text-text-muted flex items-center gap-1.5 pb-0.5">
               <Clock className="h-4 w-4" />
@@ -128,7 +131,12 @@ function ArrivalCard({ event }: { event: FlightArrivalEvent }) {
         </div>
 
         {event.time && (
-          <p className="text-2xl font-bold text-text-base tabular-nums">{fmt12(event.time)}</p>
+          <div>
+            <p className="text-2xl font-bold text-text-base tabular-nums">{fmt12(event.time)}</p>
+            <p className="text-xs text-text-muted">
+              {tzAbbr(event.timezone, event.date)}{event.utcISO ? ` · ${fmtUtc(event.utcISO)}` : ''}
+            </p>
+          </div>
         )}
 
         {event.connectingFlight && (

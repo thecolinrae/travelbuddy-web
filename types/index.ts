@@ -22,7 +22,13 @@ export interface Trip {
 
 // ─── Artifacts & Parsing ─────────────────────────────────────────────────────
 
-export type ArtifactType = 'flight' | 'hotel' | 'car_rental' | 'activity' | 'receipt' | 'other';
+export type ArtifactType =
+  | 'flight'
+  | 'hotel'
+  | 'ground_transport'  // replaces car_rental — all non-flight transport
+  | 'activity'
+  | 'expense'           // replaces receipt
+  | 'other';
 
 export interface FlightLeg {
   flightNumber?: string;
@@ -30,10 +36,8 @@ export interface FlightLeg {
   destination: string;
   departureDate: string;
   departureTime?: string;
-  departureUtc?: string;
   arrivalDate: string;
   arrivalTime?: string;
-  arrivalUtc?: string;
   travelClass?: string;
   boardingTime?: string;
   gate?: string;
@@ -78,6 +82,10 @@ export interface ParsedArtifact {
   currency?: string;
   notes?: string;
   rawText?: string;
+  // ground_transport only
+  transportType?: TransportType;
+  // LLM self-reported uncertainty — field names the model was inferring vs reading explicitly
+  uncertainFields?: string[];
 }
 
 export interface ParseResult {
@@ -298,6 +306,20 @@ export type ActivityType =
   | 'nightlife'
   | 'nature'
   | 'wellness';
+
+// ─── Import warnings ──────────────────────────────────────────────────────────
+
+export type ImportWarningCode =
+  | 'flight_time_inversion'  // arrival UTC < departure UTC after resolution
+  | 'transport_type_unknown' // ground_transport event stored as transportType 'other'
+  | 'uncertain_field';       // LLM flagged one or more fields as uncertain
+
+export interface ImportWarning {
+  code: ImportWarningCode;
+  eventId: string;
+  message: string;
+  fields?: string[];
+}
 
 export interface Activity {
   id: string;

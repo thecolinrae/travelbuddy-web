@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, CalendarDays } from 'lucide-react';
+import { ChevronLeft, ChevronRight, CalendarDays, Map } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { formatDayLabel } from './utils';
 
@@ -10,6 +10,8 @@ interface DayNavProps {
   onPrev: () => void;
   onNext: () => void;
   onJumpToToday: () => void;
+  mapOpen?: boolean;
+  onToggleMap?: () => void;
 }
 
 export function DayNav({
@@ -20,6 +22,8 @@ export function DayNav({
   onPrev,
   onNext,
   onJumpToToday,
+  mapOpen,
+  onToggleMap,
 }: DayNavProps) {
   const selectedDay = days[currentIndex] ?? '';
 
@@ -52,6 +56,17 @@ export function DayNav({
           >
             <CalendarDays className="h-3.5 w-3.5" />
             Today
+          </Button>
+        )}
+        {onToggleMap && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onToggleMap}
+            aria-label={mapOpen ? 'Hide map' : 'Show map'}
+            className={mapOpen ? 'bg-surface text-text-base' : 'text-text-muted'}
+          >
+            <Map className="h-4 w-4" />
           </Button>
         )}
         <Button

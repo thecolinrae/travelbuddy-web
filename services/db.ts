@@ -38,6 +38,7 @@ export type TripCreateInput = {
   endDate?: string;
   status?: string;
   coverEmoji?: string;
+  coverPhotoUrl?: string | null;
   itineraryMd?: string;
   notes?: string | null;
   budgetGoal?: number;
@@ -81,6 +82,7 @@ export async function updateTrip(
       ...(data.endDate !== undefined && { endDate: data.endDate }),
       ...(data.status !== undefined && { status: data.status }),
       ...(data.coverEmoji !== undefined && { coverEmoji: data.coverEmoji }),
+      ...(data.coverPhotoUrl !== undefined && { coverPhotoUrl: data.coverPhotoUrl }),
       ...(data.itineraryMd !== undefined && { itineraryMd: data.itineraryMd }),
       ...(data.notes !== undefined && { notes: data.notes }),
       ...(data.budgetGoal !== undefined && { budgetGoal: data.budgetGoal }),
@@ -183,7 +185,10 @@ export async function loadTimeline(tripId: string): Promise<TimelineEvent[]> {
     where: { tripId },
     orderBy: [{ sortUtc: 'asc' }, { eventDate: 'asc' }],
   });
-  return rows.map((r) => r.data as unknown as TimelineEvent);
+  return rows.map((r) => ({
+    ...(r.data as unknown as TimelineEvent),
+    legId: r.legId ?? undefined,
+  }));
 }
 
 // ─── Activities ───────────────────────────────────────────────────────────────

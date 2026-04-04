@@ -9,7 +9,7 @@
  */
 
 import { nanoid } from './nanoid';
-import { resolveTimezone, utcToLocalDate, utcToLocalTime, localToUtcISO } from './timezone';
+import { resolveTimezone, localToUtcISO } from './timezone';
 import type {
   ParsedArtifact,
   Passenger,
@@ -33,6 +33,23 @@ import type {
 /** Strip trailing airport codes like "(YYZ)", "(LHR)", "(EGLL)". */
 function stripAirportCode(s: string): string {
   return s.replace(/\s*\([A-Z]{3,4}\)\s*$/, '').trim();
+}
+
+/**
+ * Normalize a display location string to Title Case if it looks like ALL CAPS.
+ * Leaves already-mixed-case strings (e.g. "New York", "São Paulo") untouched.
+ * Short all-caps strings that look like airport/country codes (≤4 chars) are
+ * also left alone so "YYZ" or "NRT" aren't converted to "Yyz".
+ */
+function normalizeLocation(s: string): string {
+  if (!s) return s;
+  const letters = s.replace(/[^a-zA-Z]/g, '');
+  if (letters.length <= 4) return s; // likely a code — leave as-is
+  const upperRatio = letters.replace(/[^A-Z]/g, '').length / letters.length;
+  if (upperRatio < 0.8) return s; // already mixed case
+  return s
+    .toLowerCase()
+    .replace(/(^|[\s\-\/])(\p{L})/gu, (_, sep, c) => sep + c.toUpperCase());
 }
 
 /** Extract an IATA/ICAO code from strings like "Toronto (YYZ)" → "YYZ". */
@@ -120,36 +137,54 @@ function makeCost(
  * them consistent.
  */
 function normalizeEvent<T extends TimelineEvent>(e: T): T {
-  if (e.type === 'flight' && (e.subtype === 'departure' || e.subtype === 'arrival')) {
-    const locationStr = e.subtype === 'departure' ? e.departureAirport : e.arrivalAirport;
-    const tz = resolveTimezone(locationStr) ?? e.timezone ?? undefined;
-    if (tz && e.date && e.time) {
-      const computed = utcForEvent(e.date, e.time, tz);
-      if (computed) return { ...e, utcISO: computed, timezone: tz } as T;
+  // Normalize display location strings to Title Case (handles ALL CAPS from LLM output)
+  const withNormalizedCity = e.locationCity
+    ? { ...e, locationCity: normalizeLocation(e.locationCity) }
+    : e;
+  const withNormalizedLocations: T =
+    withNormalizedCity.type === 'otherTransportation'
+      ? {
+          ...withNormalizedCity,
+          departureLocation: normalizeLocation(withNormalizedCity.departureLocation),
+          arrivalLocation: normalizeLocation(withNormalizedCity.arrivalLocation),
+        } as T
+      : withNormalizedCity as T;
+  const normalized = withNormalizedLocations;
+
+  if (normalized.type === 'flight' && (normalized.subtype === 'departure' || normalized.subtype === 'arrival')) {
+    const depApt = normalizeLocation(normalized.departureAirport);
+    const arrApt = normalizeLocation(normalized.arrivalAirport);
+    const withNormalizedAirports = { ...normalized, departureAirport: depApt, arrivalAirport: arrApt } as typeof normalized;
+    const locationStr = normalized.subtype === 'departure' ? depApt : arrApt;
+    const tz = resolveTimezone(locationStr) ?? withNormalizedAirports.timezone ?? undefined;
+    if (tz && withNormalizedAirports.date && withNormalizedAirports.time) {
+      const computed = utcForEvent(withNormalizedAirports.date, withNormalizedAirports.time, tz);
+      if (computed) return { ...withNormalizedAirports, utcISO: computed, timezone: tz } as T;
     }
-    if (tz && !e.timezone) return { ...e, timezone: tz } as T;
-    return e;
+    if (tz && !withNormalizedAirports.timezone) return { ...withNormalizedAirports, timezone: tz } as T;
+    return withNormalizedAirports as T;
   }
 
-  if (e.type === 'otherTransportation') {
-    const locationStr = e.subtype === 'departure' ? e.departureLocation : e.arrivalLocation;
-    const tz = resolveTimezone(locationStr) ?? e.timezone ?? undefined;
-    if (tz && e.date && e.time) {
-      const computed = utcForEvent(e.date, e.time, tz);
-      if (computed) return { ...e, utcISO: computed, timezone: tz } as T;
+  if (normalized.type === 'otherTransportation') {
+    const locationStr = normalized.subtype === 'departure' ? normalized.departureLocation : normalized.arrivalLocation;
+    const tz = resolveTimezone(locationStr) ?? normalized.timezone ?? undefined;
+    if (tz && normalized.date && normalized.time) {
+      const computed = utcForEvent(normalized.date, normalized.time, tz);
+      if (computed) return { ...normalized, utcISO: computed, timezone: tz } as T;
     }
-    if (tz && !e.timezone) return { ...e, timezone: tz } as T;
-    return e;
+    if (tz && !normalized.timezone) return { ...normalized, timezone: tz } as T;
+    return normalized;
   }
 
-  // For all other event types: if utcISO + timezone are present, re-derive
-  // local date/time from UTC so they are always consistent.
-  if (!e.utcISO || !e.timezone) return e;
-  return {
-    ...e,
-    date: utcToLocalDate(e.utcISO, e.timezone),
-    time: utcToLocalTime(e.utcISO, e.timezone),
-  } as T;
+  // For all other event types (hotel, activity, expense): compute utcISO from
+  // local date+time+timezone. Local time is always authoritative — never
+  // re-derive local time from a stored utcISO.
+  const tz = normalized.timezone;
+  if (tz && normalized.date && normalized.time) {
+    const computed = utcForEvent(normalized.date, normalized.time, tz);
+    if (computed) return { ...normalized, utcISO: computed } as T;
+  }
+  return normalized;
 }
 
 /**
@@ -163,6 +198,91 @@ function utcForEvent(
 ): string | undefined {
   if (!date || !time || !tz) return undefined;
   return localToUtcISO(date, time, tz);
+}
+
+/**
+ * Advance a YYYY-MM-DD date string by one calendar day (UTC-safe).
+ */
+function bumpDay(dateStr: string): string {
+  const d = new Date(dateStr + 'T12:00:00Z');
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Given the previous leg's arrival UTC and a candidate departure local date+time+tz,
+ * return the corrected [depDate, depUtcISO] pair.
+ *
+ * Within a single booking, consecutive legs should connect within ≤24 h.  If the
+ * computed gap exceeds 24 h, the LLM has most likely used the wrong timezone's
+ * calendar date (common for dateline-crossing itineraries).  Pull the date back
+ * by one day and recompute.
+ */
+function resolveDeparture(
+  depDate: string,
+  depTime: string | undefined,
+  depTz: string | undefined,
+  prevArrUtcISO: string | undefined,
+): { date: string; utcISO: string | undefined } {
+  let date = depDate;
+  let utcISO = utcForEvent(date, depTime, depTz);
+  if (prevArrUtcISO && utcISO) {
+    const gapMs = new Date(utcISO).getTime() - new Date(prevArrUtcISO).getTime();
+    const MIN_CORRECTION_MS = 24 * 60 * 60 * 1000; // 24 h — only correct within this window
+    const MAX_CORRECTION_MS = 48 * 60 * 60 * 1000; // 48 h — ignore intentional multi-day stays
+    if (gapMs > MIN_CORRECTION_MS && gapMs <= MAX_CORRECTION_MS) {
+      // Try pulling back one day
+      const d = new Date(date + 'T12:00:00Z');
+      d.setUTCDate(d.getUTCDate() - 1);
+      const earlier = d.toISOString().slice(0, 10);
+      const earlierUtc = utcForEvent(earlier, depTime, depTz);
+      if (earlierUtc && earlierUtc >= prevArrUtcISO) {
+        // The earlier date still departs after the previous arrival — use it
+        date = earlier;
+        utcISO = earlierUtc;
+      }
+    }
+  }
+  return { date, utcISO };
+}
+
+/**
+ * Given a departure UTC ISO and a candidate arrival local date+time+tz, return
+ * the corrected [arrDate, arrUtcISO] pair.
+ *
+ * For dateline-crossing flights the LLM sometimes provides an arrival date that
+ * is one (or two) days too early, making the computed arrUtcISO fall before the
+ * depUtcISO — physically impossible.  We bump the arrival date forward by one
+ * day at a time (up to 3 attempts) until the UTC ordering is valid.
+ */
+function resolveArrival(
+  arrDate: string,
+  arrTime: string | undefined,
+  arrTz: string | undefined,
+  depUtcISO: string | undefined,
+): { date: string; utcISO: string | undefined } {
+  let date = arrDate;
+  let utcISO = utcForEvent(date, arrTime, arrTz);
+  if (depUtcISO && utcISO) {
+    // Arrival before departure — bump forward (dateline crossing etc.)
+    for (let i = 0; i < 3 && utcISO < depUtcISO; i++) {
+      date = bumpDay(date);
+      utcISO = utcForEvent(date, arrTime, arrTz) ?? utcISO;
+    }
+    // Arrival too far in the future (24–48h gap) — try pulling back one day
+    const gapMs = new Date(utcISO).getTime() - new Date(depUtcISO).getTime();
+    if (gapMs > 24 * 60 * 60 * 1000 && gapMs <= 48 * 60 * 60 * 1000) {
+      const d = new Date(date + 'T12:00:00Z');
+      d.setUTCDate(d.getUTCDate() - 1);
+      const earlier = d.toISOString().slice(0, 10);
+      const earlierUtc = utcForEvent(earlier, arrTime, arrTz);
+      if (earlierUtc && earlierUtc >= depUtcISO) {
+        date = earlier;
+        utcISO = earlierUtc;
+      }
+    }
+  }
+  return { date, utcISO };
 }
 
 // ─── Sort key ────────────────────────────────────────────────────────────────
@@ -242,8 +362,17 @@ function mergeEvents(existing: TimelineEvent, incoming: TimelineEvent): Timeline
   // Shared base — fill missing time / location precision from incoming
   const base = {
     ...existing,
+    // For transport/flight events the incoming date may have been corrected by
+    // resolveArrival/resolveDeparture; always prefer incoming so re-imports fix
+    // stale DB dates.  For other types keep existing (which is usually the same).
+    date: (incoming.type === 'flight' || incoming.type === 'otherTransportation')
+      ? (incoming.date ?? existing.date)
+      : existing.date,
     time: pick(existing.time, incoming.time),
-    utcISO: pick(existing.utcISO, incoming.utcISO),
+    // Similarly, always take a freshly-computed utcISO over a stale stored one
+    utcISO: (incoming.type === 'flight' || incoming.type === 'otherTransportation')
+      ? (incoming.utcISO ?? existing.utcISO)
+      : pick(existing.utcISO, incoming.utcISO),
     locationCity: pick(existing.locationCity, incoming.locationCity),
     locationAddress: pick(existing.locationAddress, incoming.locationAddress),
     artifactSources: (() => {
@@ -415,7 +544,9 @@ function extractEvents(
   const events: TimelineEvent[] = [];
   const src = sourceFileName;
 
-  switch (artifact.type) {
+  // Cast to string to allow legacy type values ('car_rental', 'receipt') that
+  // may appear in previously-saved artifact JSON from before the type rename.
+  switch (artifact.type as string) {
     case 'flight': {
       const legs = artifact.legs;
 
@@ -445,14 +576,19 @@ function extractEvents(
           };
           events.push(dep);
 
-          const arrDate = artifact.endDate ?? artifact.startDate;
           const arrTz = resolveTimezone(arrAirport) ?? undefined;
+          const { date: arrDate, utcISO: arrUtcISO } = resolveArrival(
+            artifact.endDate ?? artifact.startDate,
+            artifact.endTime,
+            arrTz,
+            dep.utcISO,
+          );
           const arr: FlightArrivalEvent = {
             id: nanoid(),
             type: 'flight', subtype: 'arrival',
             date: arrDate, time: artifact.endTime,
             timezone: arrTz,
-            utcISO: utcForEvent(arrDate, artifact.endTime, arrTz),
+            utcISO: arrUtcISO,
             locationCity: stripAirportCode(arrAirport) || arrAirport,
             flightNo: fn, departureAirport: depAirport, arrivalAirport: arrAirport,
             bookingRef: artifact.confirmationNumber,
@@ -494,6 +630,9 @@ function extractEvents(
       let firstDepUtc: string | undefined;
       let firstDepCity: string | undefined;
       let firstDepTz: string | undefined;
+      // Track the previous leg's arrival UTC so we can detect off-by-one-day
+      // departure dates caused by the LLM using the wrong timezone's calendar.
+      let prevArrUtcISO: string | undefined;
 
       for (let li = 0; li < legs.length; li++) {
         const leg = legs[li];
@@ -509,15 +648,16 @@ function extractEvents(
         const arrTz = resolveTimezone(arrAirport) ?? undefined;
 
         // Compute UTC from the ticket's local time + location timezone.
-        // Fall back to the LLM-provided value only when the timezone is unknown.
-        const depUtcISO = depTz
-          ? (utcForEvent(leg.departureDate, leg.departureTime, depTz) ?? leg.departureUtc)
-          : leg.departureUtc;
+        // If the computed gap from the previous leg's arrival exceeds 24 h, the
+        // LLM has likely used the wrong calendar date — pull it back by one day.
+        const { date: depDate, utcISO: depUtcISO } = resolveDeparture(
+          leg.departureDate, leg.departureTime, depTz, prevArrUtcISO,
+        );
 
         const dep: FlightDepartureEvent = {
           id: depIds[li],
           type: 'flight', subtype: 'departure',
-          date: leg.departureDate,
+          date: depDate,
           time: leg.departureTime,
           utcISO: depUtcISO,
           timezone: depTz,
@@ -556,14 +696,14 @@ function extractEvents(
           // there is a subsequent departure in the same booking.
           const isConnection = !!nextDepId && !!primaryDest && !airportsMatch(arrAirport, primaryDest);
 
-          const arrUtcISO = arrTz
-            ? (utcForEvent(leg.arrivalDate, leg.arrivalTime, arrTz) ?? leg.arrivalUtc)
-            : leg.arrivalUtc;
+          const { date: arrDate, utcISO: arrUtcISO } = resolveArrival(
+            leg.arrivalDate, leg.arrivalTime, arrTz, depUtcISO,
+          );
 
           const arr: FlightArrivalEvent = {
             id: nanoid(),
             type: 'flight', subtype: 'arrival',
-            date: leg.arrivalDate,
+            date: arrDate,
             time: leg.arrivalTime,
             utcISO: arrUtcISO,
             timezone: arrTz,
@@ -578,6 +718,8 @@ function extractEvents(
           };
 
           events.push(arr);
+          // Pass this arrival's UTC to the next leg's departure check
+          prevArrUtcISO = arrUtcISO;
         }
       }
 
@@ -684,12 +826,15 @@ function extractEvents(
       break;
     }
 
+    case 'ground_transport':
     case 'car_rental': {
+      // 'car_rental' kept as legacy fallback for previously-saved artifact JSON
+      const tType: TransportType = artifact.transportType ?? ((artifact.type as string) === 'car_rental' ? 'car_rental' : 'other');
       const pickupCity = stripAirportCode(artifact.origin ?? artifact.destination ?? '') || '';
       const dropoffCity = stripAirportCode(artifact.destination ?? artifact.origin ?? '') || '';
       const pickupTz = resolveTimezone(pickupCity) ?? undefined;
       const dropoffTz = resolveTimezone(dropoffCity || pickupCity) ?? undefined;
-      const carJourneyId = nanoid();
+      const gtJourneyId = nanoid();
 
       let pickupId: string | undefined;
       if (artifact.startDate) {
@@ -702,8 +847,8 @@ function extractEvents(
           timezone: pickupTz,
           utcISO: utcForEvent(artifact.startDate, artifact.startTime, pickupTz),
           locationCity: pickupCity,
-          journeyId: carJourneyId,
-          transportType: 'car_rental',
+          journeyId: gtJourneyId,
+          transportType: tType,
           departureLocation: artifact.origin ?? pickupCity,
           arrivalLocation: artifact.destination ?? dropoffCity,
           vendor: artifact.vendor,
@@ -725,19 +870,27 @@ function extractEvents(
           timezone: dropoffTz,
           utcISO: utcForEvent(artifact.endDate, artifact.endTime, dropoffTz),
           locationCity: dropoffCity || pickupCity,
-          journeyId: carJourneyId,
-          transportType: 'car_rental',
+          journeyId: gtJourneyId,
+          transportType: tType,
           departureLocation: artifact.origin ?? pickupCity,
           arrivalLocation: artifact.destination ?? dropoffCity,
           vendor: artifact.vendor,
+          bookingRef: artifact.confirmationNumber,
           artifactSources: src ? [src] : undefined,
         };
         events.push(arr);
       }
 
-      // ExpenseEvent at pickup time
+      // ExpenseEvent at departure time
       if (artifact.amount && artifact.amount > 0) {
         const cost = makeCost(artifact.amount, artifact.currency ?? preferredCurrency, preferredCurrency, rates);
+        const transportLabel = tType === 'car_rental' ? 'Car rental'
+          : tType === 'bus' ? 'Bus'
+          : tType === 'train' ? 'Train'
+          : tType === 'ferry' ? 'Ferry'
+          : tType === 'taxi' ? 'Taxi'
+          : tType === 'rideshare' ? 'Rideshare'
+          : 'Transport';
         const expense: ExpenseEvent = {
           id: nanoid(),
           type: 'expense',
@@ -746,9 +899,9 @@ function extractEvents(
           timezone: pickupTz,
           utcISO: utcForEvent(artifact.startDate, artifact.startTime, pickupTz),
           locationCity: pickupCity,
-          description: artifact.vendor ? `${artifact.vendor} car rental` : 'Car rental',
+          description: artifact.vendor ? `${artifact.vendor} ${transportLabel.toLowerCase()}` : transportLabel,
           vendor: artifact.vendor,
-          category: 'car_rental',
+          category: 'transport',
           cost,
           linkedEventId: pickupId,
           artifactSources: src ? [src] : undefined,
@@ -812,8 +965,9 @@ function extractEvents(
       break;
     }
 
+    case 'expense':
     default: {
-      // receipt or other — always an ExpenseEvent when cost present
+      // expense / receipt / other — ExpenseEvent when cost present, ActivityEvent otherwise
       const date = artifact.startDate ?? artifact.checkIn;
       const defaultCity = stripAirportCode(artifact.destination ?? '') || artifact.destination || '';
       const defaultTz = resolveTimezone(defaultCity) ?? undefined;

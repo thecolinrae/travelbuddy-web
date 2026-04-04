@@ -5,7 +5,7 @@ import {
   ArrowRight, ShieldAlert, Stamp, Armchair, Users,
   LogIn, LogOut, Coffee, Award, MapPin,
   Bus, Train, Ship, Car, Navigation,
-  DollarSign, Sun,
+  DollarSign, Sun, Globe,
 } from 'lucide-react';
 import {
   Sheet,
@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/sheet';
 import { Badge } from '@/components/ui/badge';
 import { CategoryIcon } from '@/components/trip/activityIcons';
-import { fmt12 } from './utils';
+import { fmt12, fmtUtc, tzAbbr } from './utils';
 import type {
   TimelineEvent,
   FlightDepartureEvent,
@@ -100,6 +100,12 @@ function FlightDepartureDetail({ event }: { event: FlightDepartureEvent }) {
           <DetailRow icon={<Clock className="h-4 w-4" />} label="Departure" value={fmt12(event.time)} />
           {event.boardingTime && (
             <DetailRow icon={<Clock className="h-4 w-4" />} label="Board by" value={fmt12(event.boardingTime)} />
+          )}
+          {event.utcISO && (
+            <DetailRow icon={<Globe className="h-4 w-4" />} label="UTC time" value={fmtUtc(event.utcISO)} />
+          )}
+          {event.timezone && (
+            <DetailRow icon={<Globe className="h-4 w-4" />} label="Timezone" value={`${event.timezone} (${tzAbbr(event.timezone, event.date)})`} />
           )}
         </div>
 
@@ -191,9 +197,17 @@ function FlightArrivalDetail({ event }: { event: FlightArrivalEvent }) {
       </SheetHeader>
 
       <div className="flex-1 space-y-6 py-4">
-        {event.time && (
-          <DetailRow icon={<Clock className="h-4 w-4" />} label="Arrival time" value={fmt12(event.time)} />
-        )}
+        <div className="grid grid-cols-2 gap-3">
+          {event.time && (
+            <DetailRow icon={<Clock className="h-4 w-4" />} label="Arrival time" value={fmt12(event.time)} />
+          )}
+          {event.utcISO && (
+            <DetailRow icon={<Globe className="h-4 w-4" />} label="UTC time" value={fmtUtc(event.utcISO)} />
+          )}
+          {event.timezone && (
+            <DetailRow icon={<Globe className="h-4 w-4" />} label="Timezone" value={`${event.timezone} (${tzAbbr(event.timezone, event.date)})`} />
+          )}
+        </div>
         {event.connectingFlight && (
           <p className="text-sm text-text-muted flex items-center gap-1.5">
             <ArrowRight className="h-4 w-4 shrink-0" />
@@ -416,13 +430,21 @@ function TransportDetail({ event }: { event: TransportDepartureEvent | Transport
       </SheetHeader>
 
       <div className="flex-1 space-y-6 py-4">
-        {event.time && (
-          <DetailRow
-            icon={<Clock className="h-4 w-4" />}
-            label={isDep ? 'Departure' : 'Arrival'}
-            value={fmt12(event.time)}
-          />
-        )}
+        <div className="grid grid-cols-2 gap-3">
+          {event.time && (
+            <DetailRow
+              icon={<Clock className="h-4 w-4" />}
+              label={isDep ? 'Departure' : 'Arrival'}
+              value={fmt12(event.time)}
+            />
+          )}
+          {event.utcISO && (
+            <DetailRow icon={<Globe className="h-4 w-4" />} label="UTC time" value={fmtUtc(event.utcISO)} />
+          )}
+          {event.timezone && (
+            <DetailRow icon={<Globe className="h-4 w-4" />} label="Timezone" value={`${event.timezone} (${tzAbbr(event.timezone, event.date)})`} />
+          )}
+        </div>
         {event.vendor && (
           <p className="text-sm text-text-base flex items-center gap-1.5">
             <Users className="h-4 w-4 text-text-muted shrink-0" />

@@ -12,6 +12,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { prisma } from '@/lib/prisma';
 import { loadActivities, saveActivities } from './db';
+import { filterOpenPlaces } from './places';
 import type { Activity } from '@/types';
 
 const client = new Anthropic(); // reads ANTHROPIC_API_KEY
@@ -125,7 +126,8 @@ export async function processBatchResults(jobId: string): Promise<void> {
       .join('');
     try {
       const activities = parseActivities(text);
-      allNew.push(...activities.map((a) => ({ ...a, city: dest, saved: true as const })));
+      const verified = await filterOpenPlaces(activities, dest);
+      allNew.push(...verified.map((a) => ({ ...a, city: dest, saved: true as const })));
     } catch {
       // skip this destination — non-fatal
     }

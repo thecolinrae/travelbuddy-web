@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Bus, Train, Ship, Car, Navigation, ArrowRight, Info } from 'lucide-react';
-import { fmt12 } from './utils';
+import { fmt12, fmtUtc, tzAbbr } from './utils';
 import { EventDetailSheet } from './EventDetailSheet';
 import type { TransportDepartureEvent, TransportArrivalEvent, TransportType } from '@/types';
 
@@ -68,7 +68,12 @@ function DepartureCard({ event }: { event: TransportDepartureEvent }) {
 
         {/* Time */}
         {event.time && (
-          <p className="text-2xl font-bold text-text-base tabular-nums">{fmt12(event.time)}</p>
+          <div>
+            <p className="text-2xl font-bold text-text-base tabular-nums">{fmt12(event.time)}</p>
+            <p className="text-xs text-text-muted">
+              {tzAbbr(event.timezone, event.date)}{event.utcISO ? ` · ${fmtUtc(event.utcISO)}` : ''}
+            </p>
+          </div>
         )}
 
         {/* Detail row */}
@@ -115,7 +120,12 @@ function ArrivalCard({ event }: { event: TransportArrivalEvent }) {
         </div>
 
         {event.time && (
-          <p className="text-2xl font-bold text-text-base tabular-nums">{fmt12(event.time)}</p>
+          <div>
+            <p className="text-2xl font-bold text-text-base tabular-nums">{fmt12(event.time)}</p>
+            <p className="text-xs text-text-muted">
+              {tzAbbr(event.timezone, event.date)}{event.utcISO ? ` · ${fmtUtc(event.utcISO)}` : ''}
+            </p>
+          </div>
         )}
 
         {(event.vendor || event.bookingRef) && (

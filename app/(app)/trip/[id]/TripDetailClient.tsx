@@ -18,21 +18,22 @@ import { TripEditModal } from '@/components/trip/TripEditModal';
 import { DayTab } from '@/components/trip/DayTab';
 import { buildDayRange } from '@/components/trip/day/utils';
 import { TimelineTab } from '@/components/trip/TimelineTab';
+import { ImportReviewBanner } from '@/components/trip/ImportReviewBanner';
 import { SpendTab } from '@/components/trip/SpendTab';
-import { MapTab } from '@/components/trip/MapTab';
 import { ActivitiesTab } from '@/components/trip/ActivitiesTab';
 import { DocumentsTab } from '@/components/trip/DocumentsTab';
 import { NotesTab } from '@/components/trip/NotesTab';
 import { TripChatPanel } from '@/components/trip/TripChatPanel';
+import { CityMapView } from '@/components/trip/map/CityMapView';
 import type { ArtifactInfo } from '@/components/trip/DocumentsTab';
-import type { TimelineEvent, Activity, BudgetItemCategory } from '@/types';
+import type { TimelineEvent, Activity, BudgetItemCategory, ImportWarning } from '@/types';
 import type { LegSummary } from '@/components/trip/DayTab';
 
 type TabId =
   | 'day'
   | 'timeline'
-  | 'spend'
   | 'map'
+  | 'spend'
   | 'activities'
   | 'documents'
   | 'notes';
@@ -40,8 +41,8 @@ type TabId =
 function buildTabs(status: string) {
   return [
     { id: 'day' as const,         label: status === 'active' ? 'Today' : 'Day' },
-    { id: 'spend' as const,       label: 'Spend'       },
     { id: 'map' as const,         label: 'Map'         },
+    { id: 'spend' as const,       label: 'Spend'       },
     { id: 'activities' as const,  label: 'Activities'  },
     { id: 'documents' as const,   label: 'Documents'   },
     { id: 'notes' as const,       label: 'Notes'       },
@@ -110,6 +111,17 @@ export function TripDetailClient({ trip, timeline, legs, activities: initialActi
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [importWarnings, setImportWarnings] = useState<ImportWarning[]>([]);
+  const [reviewedIds, setReviewedIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    const key = `importWarnings:${trip.id}`;
+    const raw = sessionStorage.getItem(key);
+    if (raw) {
+      try { setImportWarnings(JSON.parse(raw) as ImportWarning[]); } catch { /* ignore */ }
+      sessionStorage.removeItem(key);
+    }
+  }, [trip.id]);
 
   const destinations =
     trip.destinations?.length > 1
@@ -122,7 +134,18 @@ export function TripDetailClient({ trip, timeline, legs, activities: initialActi
     (e) => e.type === 'flight' || e.type === 'otherTransportation',
   );
 
-  function handleActivityMutation() {
+  async function handleActivityMutation() {
+    // Directly update activities state so the Activities tab reflects changes
+    // immediately, without waiting for router.refresh() to complete.
+    try {
+      const res = await fetch(`/api/trips/${trip.id}/activities`);
+      if (res.ok) {
+        const data = (await res.json()) as { savedActivities: Activity[] };
+        setActivities(data.savedActivities ?? []);
+      }
+    } catch {
+      // Non-fatal — router.refresh() below will still sync the page
+    }
     router.refresh();
   }
 
@@ -268,6 +291,20 @@ export function TripDetailClient({ trip, timeline, legs, activities: initialActi
         </div>
       </div>
 
+      {/* Import review banner — shown when warnings exist from a recent import */}
+      {importWarnings.length > 0 && reviewedIds.size < importWarnings.length && (
+        <div className="max-w-4xl mx-auto w-full">
+          <ImportReviewBanner
+            warnings={importWarnings}
+            reviewedIds={reviewedIds}
+            timeline={timeline}
+            tripId={trip.id}
+            onEventReviewed={(id) => setReviewedIds((prev) => new Set([...prev, id]))}
+            onDismiss={() => setImportWarnings([])}
+          />
+        </div>
+      )}
+
       {/* Tab content */}
       <div className="flex-1 max-w-4xl mx-auto w-full px-4 py-6">
         {activeTab === 'day' && (
@@ -301,6 +338,13 @@ export function TripDetailClient({ trip, timeline, legs, activities: initialActi
             />
           </div>
         )}
+        {activeTab === 'map' && (
+          <CityMapView
+            trip={{ destinations: trip.destinations, status: trip.status }}
+            timeline={timeline}
+            activities={activities}
+          />
+        )}
         {activeTab === 'spend' && (
           <SpendTab
             tripId={trip.id}
@@ -311,8 +355,7 @@ export function TripDetailClient({ trip, timeline, legs, activities: initialActi
             isOwner={isOwner}
           />
         )}
-        {activeTab === 'map' && <MapTab timeline={timeline} />}
-        {activeTab === 'activities' && (
+{activeTab === 'activities' && (
           <ActivitiesTab
             tripId={trip.id}
             destination={trip.destination}
@@ -372,6 +415,7 @@ export function TripDetailClient({ trip, timeline, legs, activities: initialActi
           initial={{
             name: trip.name,
             coverEmoji: trip.coverEmoji,
+            coverPhotoUrl: trip.coverPhotoUrl,
             destination: trip.destination,
             startDate: trip.startDate,
             endDate: trip.endDate,

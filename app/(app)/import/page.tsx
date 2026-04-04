@@ -120,12 +120,18 @@ export default function ImportPage() {
           try {
             const event = JSON.parse(line.slice(6)) as
               | { type: 'progress'; step: string; completed: number; total: number }
-              | { type: 'done'; tripId: string }
+              | { type: 'done'; tripId: string; warnings?: import('@/types').ImportWarning[] }
               | { type: 'error'; message: string };
 
             if (event.type === 'progress') {
               setProgress({ step: event.step, completed: event.completed, total: event.total });
             } else if (event.type === 'done') {
+              if (event.warnings?.length) {
+                sessionStorage.setItem(
+                  `importWarnings:${event.tripId}`,
+                  JSON.stringify(event.warnings),
+                );
+              }
               router.push(`/trip/${event.tripId}`);
               return;
             } else if (event.type === 'error') {

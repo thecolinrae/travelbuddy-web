@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { LegCard } from './LegCard';
 import { MergeAffordance } from './MergeAffordance';
 import { UnassignedSection } from './UnassignedSection';
+import { TransportRouteMap } from '@/components/trip/map/TransportRouteMap';
 import type { LegWithEvents } from '@/services/legs';
 import type { TimelineEvent } from '@/types';
 
@@ -168,9 +169,23 @@ export function TransportationView({ tripId, initialLegs, initialUnassigned, isO
     );
   }
 
+  function legEarliestUtc(leg: LegWithEvents): string {
+    return leg.events
+      .map((e) => e.utcISO ?? e.date ?? '')
+      .filter(Boolean)
+      .sort()[0] ?? '';
+  }
+
+  const sortedLegs = [...legs].sort((a, b) =>
+    legEarliestUtc(a).localeCompare(legEarliestUtc(b)),
+  );
+
   return (
-    <div className="space-y-1">
-      {legs.map((leg, i) => (
+    <div className="space-y-6">
+      <TransportRouteMap legs={sortedLegs} />
+
+      <div className="space-y-1">
+      {sortedLegs.map((leg, i) => (
         <div key={leg.id}>
           <LegCard
             leg={leg}
@@ -182,9 +197,9 @@ export function TransportationView({ tripId, initialLegs, initialUnassigned, isO
             onAssignEvent={(eventId) => handleAssign(eventId, null)}
             legOptions={legs}
           />
-          {isOwner && i < legs.length - 1 && (
+          {isOwner && i < sortedLegs.length - 1 && (
             <MergeAffordance
-              onMerge={() => handleMerge(leg.id, legs[i + 1].id)}
+              onMerge={() => handleMerge(leg.id, sortedLegs[i + 1].id)}
             />
           )}
         </div>
@@ -213,6 +228,7 @@ export function TransportationView({ tripId, initialLegs, initialUnassigned, isO
           tripId={tripId}
         />
       )}
+      </div>
     </div>
   );
 }

@@ -167,8 +167,8 @@ export function EventFormModal({ tripId, open, onClose, onSaved, editing, transp
         type: 'flight',
         subtype: 'departure',
         flightNo: flightNo.trim(),
-        departureAirport: depAirport.trim().toUpperCase(),
-        arrivalAirport: arrAirport.trim().toUpperCase(),
+        departureAirport: depAirport.trim(),
+        arrivalAirport: arrAirport.trim(),
         bookingRef: flightBookingRef.trim() || undefined,
         notes: fdNotes.trim() || undefined,
         seatNumber: seatNumber.trim() || undefined,
@@ -186,8 +186,8 @@ export function EventFormModal({ tripId, open, onClose, onSaved, editing, transp
         type: 'flight',
         subtype: 'arrival',
         flightNo: flightNo.trim(),
-        departureAirport: depAirport.trim().toUpperCase(),
-        arrivalAirport: arrAirport.trim().toUpperCase(),
+        departureAirport: depAirport.trim(),
+        arrivalAirport: arrAirport.trim(),
         bookingRef: flightBookingRef.trim() || undefined,
       } as Omit<FlightArrivalEvent, 'id'>;
     }

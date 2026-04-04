@@ -365,7 +365,13 @@ export function localToUtcISO(dateStr: string, timeStr: string, ianaTimezone: st
       hour: '2-digit', minute: '2-digit', hour12: false,
     }).formatToParts(guess);
     const get = (type: string) => parseInt(parts.find(p => p.type === type)?.value ?? '0', 10);
-    const localAsUTC = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'));
+    // Some ICU/Node versions return hour=24 for midnight (24:00) instead of 0.
+    // Date.UTC(..., 24, ...) overflows to the next day, making localAsUTC 24h too
+    // large and the final result 24h too early.  Clamp to 0 — the date part is
+    // already correct so no day adjustment is needed.
+    const rawHour = get('hour');
+    const hour = rawHour === 24 ? 0 : rawHour;
+    const localAsUTC = Date.UTC(get('year'), get('month') - 1, get('day'), hour, get('minute'));
     return new Date(2 * guess.getTime() - localAsUTC).toISOString();
   } catch {
     return `${dateStr}T${timeStr}:00.000Z`;

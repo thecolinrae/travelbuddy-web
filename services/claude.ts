@@ -81,7 +81,7 @@ Return ONLY a JSON object matching this schema:
 {
   "artifacts": [
     {
-      "type": "flight|hotel|car_rental|activity|receipt|other",
+      "type": "flight|hotel|ground_transport|activity|expense|other",
       "vendor": "string (airline, hotel chain, rental company, etc.)",
       "confirmationNumber": "string",
       "startDate": "YYYY-MM-DD (first departure / check-in / pickup date)",
@@ -101,10 +101,8 @@ Return ONLY a JSON object matching this schema:
           "destination": "string (e.g. Frankfurt (FRA))",
           "departureDate": "YYYY-MM-DD (local date at origin airport)",
           "departureTime": "HH:MM (24h local time at origin airport)",
-          "departureUtc": "YYYY-MM-DDTHH:MM:00Z (UTC — convert using known airport timezone; omit if uncertain)",
           "arrivalDate": "YYYY-MM-DD (local date at destination airport)",
           "arrivalTime": "HH:MM (24h local time at destination airport)",
-          "arrivalUtc": "YYYY-MM-DDTHH:MM:00Z (UTC — convert using known airport timezone; omit if uncertain)",
           "travelClass": "Economy|Premium Economy|Business|First (omit if not stated)",
           "boardingTime": "HH:MM (local boarding time if shown on ticket/boarding pass; omit if not shown)",
           "gate": "string (departure gate if shown; omit if not shown)",
@@ -132,7 +130,20 @@ Return ONLY a JSON object matching this schema:
       "amount": number,
       "currency": "USD",
       "notes": "string",
-      "activityCategory": "sightseeing|food|adventure|culture|shopping|nightlife|nature|wellness (activity artifacts only)"
+      "activityCategory": "sightseeing|food|adventure|culture|shopping|nightlife|nature|wellness (activity artifacts only)",
+
+      // GROUND TRANSPORT ONLY (type: "ground_transport"):
+      "transportType": "bus|train|ferry|car_rental|taxi|rideshare|other",
+      // "origin" = departure city, station, or stop name
+      // "destination" = arrival city, station, or stop name
+      // "startDate"/"startTime" = departure date/time (local at origin)
+      // "endDate"/"endTime" = arrival date/time (local at destination, if known)
+
+      // ALWAYS INCLUDE — empty array if fully confident:
+      "uncertainFields": ["fieldName1", "fieldName2"]
+      // List every field whose value you are inferring rather than reading explicitly.
+      // Examples: date inferred from context; transportType guessed from vendor name;
+      // destination inferred from document title. Empty array [] means fully confident.
     }
   ],
   "suggestedTripName": "string",
@@ -146,11 +157,13 @@ Return ONLY a JSON object matching this schema:
 
 Rules:
 - FLIGHT LEGS: For flights, always populate "legs" — one object per segment. A connecting itinerary (YYZ→FRA→LHR) produces two leg objects.
+- MULTI-LEG DATE TRACKING (critical): For each leg, departureDate and arrivalDate are the LOCAL calendar dates at the respective airport — determined entirely by the clock and calendar at that specific airport, not carried forward from another timezone. When a connecting itinerary crosses many time zones or the International Date Line, each leg's date must be computed independently. Example: a flight departing Sydney (AEDT, UTC+11) at 11:20 on Feb 20 arrives Vancouver (PST, UTC-8) at 06:50 on Feb 20 — the same calendar date in Vancouver, because traveling eastward across the Pacific "gains back" the hours. The next connecting leg departing Vancouver at 08:15 also has departureDate = Feb 20 (the local date AT Vancouver), not Feb 21. Never use the date at the previous destination's timezone to set the next departure date.
+- PLUS-DAYS NOTATION: When a booking shows arrival as "+1 day", "+2 days", etc. relative to the departure, add that many calendar days to the departure date to get the arrival date. Example: departure Feb 12, "+2 days" → arrivalDate = Feb 14.
 - TRIP TYPE: Set "tripType" to "round_trip" if the final leg's destination airport matches the first leg's origin airport (the traveler returns home). Set "tripType" to "one_way" if the final destination is different from the origin. Omit "tripType" only if the document provides insufficient information to determine this.
 - ROUND TRIPS IN ONE DOCUMENT: If a single document covers both the outbound and return flights under one booking reference, create ONE flight artifact with all segments in "legs" (outbound first, then return). Do NOT create two separate artifacts for a single booking.
 - SEPARATE BOOKINGS: Only create separate artifacts when the outbound and return have distinct confirmation numbers or were purchased separately.
 - FLIGHT COST: "amount" is the TOTAL confirmed price for the entire flight booking. Always set "amount" at the artifact level — never inside a leg. Do not omit it if any price is visible in the document.
-- CURRENCY: Use the ISO currency code explicitly stated in the document. If no currency is stated, infer it from the location/country of the transaction (e.g. a hotel in Tokyo → JPY, a restaurant receipt in London → GBP, a flight departing Sydney → AUD, a car rental in Paris → EUR). Never leave currency blank if the amount is non-zero.
+- CURRENCY: Use the ISO currency code explicitly stated in the document. If no currency is stated, infer it from the location/country of the transaction (e.g. a hotel in Tokyo → JPY, a restaurant receipt in London → GBP, a flight departing Sydney → AUD, a car rental in Paris → EUR, a train ticket in Japan → JPY). Never leave currency blank if the amount is non-zero.
 - HOTEL TIMES: "checkInTime" is the EARLIEST standard check-in time stated in the booking (e.g. "3:00 PM" → "15:00"). "checkOutTime" is the LATEST standard check-out time (e.g. "11:00 AM" → "11:00"). If the booking states a specific scheduled check-in time (e.g. early check-in arranged), use that. Omit if no time is stated anywhere in the document.
 - Set "startDate"/"endDate" at the artifact level to the overall first departure / last arrival dates.
 - Set "origin" at the artifact level to the first leg's origin city+airport (where the outbound journey begins).
@@ -158,44 +171,11 @@ Rules:
 - HOTEL DESTINATION (required): For hotel artifacts, "destination" is the city where the hotel is located. This field MUST always be populated — never leave it blank. Infer the city from the hotel name (e.g. "Marriott Paris" → "Paris", "Hilton London Kensington" → "London"), the booking address, or any location reference in the document. Use a plain city name (e.g. "Paris", "Tokyo") — no airport codes, no full addresses.
 - ACTIVITY CATEGORY: For artifacts with type "activity", set "activityCategory" to the best-matching label: "food" (restaurants, cafes, dining), "sightseeing" (landmarks, museums, tours), "culture" (theatre, concerts, galleries), "nightlife" (bars, clubs, evening entertainment), "shopping" (markets, shops, malls), "nature" (parks, hikes, beaches, outdoors), "adventure" (extreme sports, zip-lining, water sports), "wellness" (spa, yoga, fitness). Use "sightseeing" as the default if uncertain.
 - CITY NORMALISATION (critical): "destination" must always be at the city or municipality level — never a neighbourhood, district, suburb, or street. If the document mentions a sub-city area, put the parent city in "destination" and store the sub-city detail in "locationAddress". Examples: hotel in "Surry Hills" → destination="Sydney", locationAddress="Surry Hills"; activity in "The Annex, Toronto" → destination="Toronto", locationAddress="The Annex"; restaurant on "Rue du Faubourg Saint-Honoré, Paris" → destination="Paris", locationAddress="Rue du Faubourg Saint-Honoré". Apply the same rule to activity and transport artifacts.
-- CAR RENTAL / TRANSPORT DESTINATION (required): For car_rental and other transport artifacts, "destination" is the drop-off or arrival city. This field MUST always be populated — never leave it blank. If no explicit drop-off location is stated (e.g. a round-trip rental returning to the same location), use the pickup city. Use a plain city name — no airport codes, no full addresses.
+- GROUND TRANSPORT: Use type "ground_transport" for bus tickets, coach/shuttle bookings, train/rail reservations, ferry/boat tickets, taxi receipts, car rental confirmations, and rideshare receipts (Uber, Lyft, Bolt, etc.). Set "transportType" to the best match: "bus" (intercity coaches, airport shuttles, city buses), "train" (rail, metro, Eurostar, Amtrak, Shinkansen), "ferry" (boats, water taxis, catamarans), "car_rental" (hired cars with a rental agreement), "taxi" (metered taxi), "rideshare" (app-based rides). Use "transportType": "other" only when none of the above fits. Never use artifact type "car_rental" — always use type "ground_transport" with transportType "car_rental".
+- EXPENSE: Use type "expense" for standalone receipts, charges, or invoices that are not a booking/reservation for a specific activity or transport service (e.g. a restaurant bill, a shop receipt, a travel insurance invoice). Populate "amount", "currency", "vendor", "startDate". Set "destination" to the city where the expense occurred.
+- GROUND TRANSPORT DESTINATION (required): For ground_transport artifacts, "destination" is the drop-off or arrival city/station. This field MUST always be populated — never leave it blank. If no explicit drop-off location is stated (e.g. a round-trip car rental returning to pickup), use the pickup city. Use a plain city name — no airport codes, no full addresses.
+- UNCERTAIN FIELDS: For every field whose value you are inferring or guessing rather than reading explicitly from the document, add that field name to "uncertainFields". Common examples: a date inferred from surrounding context; a transportType guessed from the vendor name; a destination inferred from the document title rather than stated in the booking. An empty array means you are fully confident in all extracted values. Always include the "uncertainFields" key even when the array is empty.
 - TRIP-LEVEL: "primaryDestination" in the top-level response is the main destination city for the whole document (same logic — for round trips it is where the traveler goes, not where they live). Use plain city names only — no airport codes (e.g. "London", not "London (LHR)"). "destinations" is an ARRAY of ALL distinct cities/places the traveler will actually visit and stay (not origins, not layovers) — for a YYZ→LHR→CDG→YYZ round trip this would be ["London", "Paris"]. City names only, no airport codes. "suggestedTripName" should be a brief, evocative name like "London & Paris" or "Tokyo Adventure" — not "Trip from Toronto to Toronto".
-- ARRIVAL TIME CALCULATION — follow these four steps exactly for every leg:
-  Step 1 — departure → UTC: departureUtc = departureDate + departureTime − (origin UTC offset).
-    For UTC+ airports, subtract the offset (e.g. SYD UTC+11: 09:00 − 11h = previous day 22:00 UTC).
-    For UTC− airports, add the absolute offset (e.g. YYZ UTC−4: 23:30 + 4h = next day 03:30 UTC).
-  Step 2 — add flight duration: arrivalUtc = departureUtc + flight duration. Carry the date forward if addition crosses midnight UTC.
-  Step 3 — UTC → arrival local: arrivalLocal = arrivalUtc + (destination UTC offset). Carry the date forward/back if this crosses midnight.
-  Step 4 — VALIDATE: arrivalUtc MUST be strictly greater than departureUtc. It is physically impossible to arrive before you depart when both times are in UTC. If arrivalUtc ≤ departureUtc you have made an arithmetic error — recheck your offsets and redo steps 1–3.
-  NEVER add flight duration to local departure time. NEVER apply date-line crossing intuitions ("going east loses a day"). Always compute through UTC.
-  EXAMPLE A — high-UTC+ origin to UTC− destination (Sydney → Vancouver, February):
-    Depart SYD 2025-02-20 09:00 AEDT (UTC+11)
-    Step 1: 09:00 − 11h = 2025-02-19T22:00Z  ← UTC date is Feb 19, one day before local Sydney date
-    Step 2: + 14h = 2025-02-20T12:00Z
-    Step 3: YVR PST (UTC−8): 12:00 − 8h = 04:00 same UTC date → arrivalDate=2025-02-20, arrivalTime=04:00
-    Step 4: 2025-02-20T12:00Z > 2025-02-19T22:00Z ✓
-  EXAMPLE B — UTC− origin to UTC+ destination, crosses midnight UTC (Toronto → London, June):
-    Depart YYZ 2024-06-10 23:30 EDT (UTC−4)
-    Step 1: 23:30 + 4h = 2024-06-11T03:30Z  ← UTC date is Jun 11
-    Step 2: + 8h = 2024-06-11T11:30Z
-    Step 3: LHR BST (UTC+1): 11:30 + 1h = 12:30 → arrivalDate=2024-06-11, arrivalTime=12:30
-    Step 4: 2024-06-11T11:30Z > 2024-06-11T03:30Z ✓
-  EXAMPLE C — long westbound, arrival date +2 from local departure date (LA → Tokyo, June):
-    Depart LAX 2024-06-10 22:00 PDT (UTC−7)
-    Step 1: 22:00 + 7h = 2024-06-11T05:00Z
-    Step 2: + 11h = 2024-06-11T16:00Z
-    Step 3: NRT JST (UTC+9): 16:00 + 9h = 25:00 → +1 day → arrivalDate=2024-06-12, arrivalTime=01:00
-    Step 4: 2024-06-11T16:00Z > 2024-06-11T05:00Z ✓
-  EXAMPLE D — eastbound across the date line, local arrival SAME day as departure (Tokyo → Los Angeles, June):
-    Depart NRT 2025-06-10 11:00 JST (UTC+9)
-    Step 1: 11:00 − 9h = 2025-06-10T02:00Z
-    Step 2: + 9h 30min flight = 2025-06-10T11:30Z
-    Step 3: LAX PDT (UTC−7): 11:30 − 7h = 04:30 → arrivalDate=2025-06-10, arrivalTime=04:30
-    Step 4: 2025-06-10T11:30Z > 2025-06-10T02:00Z ✓
-    Note: local arrival date (June 10) is the SAME as local departure date even though ~9.5 h
-    elapsed. This is normal for eastbound transpacific flights — do NOT add a day to the arrival.
-- EASTBOUND DATE LINE: When flying east across the date line (e.g. Asia/Pacific → Americas), local arrival date is often the same as or only one day after the local departure date. Trust the UTC arithmetic — do not "correct" this by adding a day to the arrival.
-- UTC times: populate departureUtc and arrivalUtc for every leg whenever you know or can reliably infer the airport timezone. Common offsets (account for DST by date): YYZ=UTC−5/−4DST, LHR=UTC+0/+1BST, NRT=UTC+9, SYD=UTC+10/+11AEDT(Oct–Apr), LAX=UTC−8/−7PDT, YVR=UTC−8/−7PDT, CDG=UTC+1/+2CEST, DXB=UTC+4, SIN=UTC+8, HKG=UTC+8. Omit only if truly uncertain.
 - DATE YEAR INFERENCE: When a document states a date without a year (e.g. "Jun 10", "Mon 10 Mar", "March 10th"), infer the year using the current date provided at the top of the request. Do not use any other default year.
 - PASSENGERS (flight artifacts): If the booking lists multiple passengers by name, populate "passengers" as an array with one entry per passenger — each entry having at minimum "name". Include "seatNumber" per passenger if individual seat assignments are shown, and "mealChoice" if meal preferences are listed. For a single-passenger document, omit "passengers" entirely. Set "passengerCount" to the total number of passengers (infer from passengers.length if not explicitly stated; omit if unknown). The top-level "seatNumber" remains the primary/first-passenger seat for backward compatibility.
 - Omit any other field that is not present in the document. Return only the JSON, no commentary.`;
@@ -287,6 +267,7 @@ Return ONLY a JSON array with this schema:
     "bestTime": "Morning|Evening|Anytime",
     "tips": "One practical tip for visitors",
     "address": "Specific neighbourhood or area (not a full street address)",
+    "city": "City name only (e.g. 'Tokyo', 'Paris') — the municipality where this activity is located",
     "rating": 4.5,
     "saved": false
   }

@@ -25,6 +25,7 @@ export async function PATCH(
     startDate?: string;
     endDate?: string;
     coverEmoji?: string;
+    coverPhotoUrl?: string | null;
     status?: string;
     notes?: string | null;
   };

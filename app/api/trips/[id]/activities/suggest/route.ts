@@ -1,6 +1,7 @@
 import { auth } from '@/lib/auth';
 import { getTrip } from '@/services/db';
 import { suggestActivities } from '@/services/claude';
+import { filterOpenPlaces } from '@/services/places';
 
 async function getUserId(): Promise<string | null> {
   const session = await auth();
@@ -24,6 +25,7 @@ export async function POST(
   const startDate = trip.startDate ?? new Date().toISOString().slice(0, 10);
   const endDate = trip.endDate ?? startDate;
 
-  const suggestions = await suggestActivities(destination, startDate, endDate, body.prompt);
+  const raw = await suggestActivities(destination, startDate, endDate, body.prompt);
+  const suggestions = await filterOpenPlaces(raw, destination);
   return Response.json({ suggestions });
 }

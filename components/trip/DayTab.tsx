@@ -1,7 +1,8 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import { CalendarDays, Route, UtensilsCrossed, List } from 'lucide-react';
+import { DayMapPanel } from '@/components/trip/map/DayMapPanel';
 import { Button } from '@/components/ui/button';
 import { DayNav } from './day/DayNav';
 import { NowIndicator } from './day/NowIndicator';
@@ -192,6 +193,8 @@ function buildSegments(items: DayItem[], legNameById: Map<string, string | null>
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function DayTab({ trip, tripId, timeline, activities, legs, isOwner, currentIndex, onIndexChange, onViewTimeline, onActivityUpdate }: DayTabProps) {
+  const [mapOpen, setMapOpen] = useState(false);
+
   // Build a map of legId → leg name for grouping transport events
   const legNameById = new Map<string, string | null>(
     (legs ?? []).map((l) => [l.id, l.name]),
@@ -242,12 +245,24 @@ export function DayTab({ trip, tripId, timeline, activities, legs, isOwner, curr
         onPrev={() => onIndexChange(Math.max(0, currentIndex - 1))}
         onNext={() => onIndexChange(Math.min(days.length - 1, currentIndex + 1))}
         onJumpToToday={() => onIndexChange(days.indexOf(today))}
+        mapOpen={mapOpen}
+        onToggleMap={isEmpty ? undefined : () => setMapOpen((v) => !v)}
       />
+
+      {mapOpen && !isEmpty && (
+        <DayMapPanel
+          key={`${selectedDay}-${items
+            .filter((i) => i.kind !== 'now')
+            .map((i) => (i.kind === 'activity' ? i.activity.id : i.event.id))
+            .join(',')}`}
+          items={items}
+        />
+      )}
 
       <div className="space-y-3">
         {isEmpty ? (
           <EmptyDayState />
-        ) : segments.map((seg) => {
+        ) : segments.map((seg, segIdx) => {
           if (seg.kind === 'solo') {
             const { item, idx } = seg.entry;
             const isPast = isToday && nowIndex !== -1 && idx < nowIndex;
@@ -267,7 +282,7 @@ export function DayTab({ trip, tripId, timeline, activities, legs, isOwner, curr
           const allPast = isToday && nowIndex !== -1 && seg.entries.every(({ idx }) => idx < nowIndex);
           const isMulti = seg.entries.length > 1;
           return (
-            <div key={`leg-${seg.legId}`} className={allPast ? 'opacity-60' : ''}>
+            <div key={`leg-${seg.legId}-${segIdx}`} className={allPast ? 'opacity-60' : ''}>
               <p className="text-xs font-medium text-text-muted uppercase tracking-wide pb-1.5">
                 {seg.legName}
               </p>

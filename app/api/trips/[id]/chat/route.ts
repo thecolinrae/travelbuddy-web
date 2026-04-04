@@ -9,6 +9,7 @@ import {
   type AnthropicChatMessage,
   type AnthropicContentBlock,
 } from '@/services/claude';
+import { filterOpenPlaces } from '@/services/places';
 import { nanoid } from '@/services/nanoid';
 import type { Activity, ActivityType, BudgetItemCategory } from '@/types';
 import type { TripRow } from '@/services/db';
@@ -110,7 +111,7 @@ const CHAT_TOOLS: ChatToolDefinition[] = [
   {
     name: 'suggest_activities',
     description:
-      'Get activity recommendations for a city. Returns a list of suggestions — does not automatically save them. Present the results and offer to add specific ones.',
+      'Get activity recommendations for a city. Returns a list of suggestions and automatically saves them to the trip\'s Activities pool so the user can schedule them later. Present the results and offer to schedule specific ones.',
     input_schema: {
       type: 'object',
       properties: {
@@ -266,13 +267,43 @@ async function executeTool(
   }
 
   if (toolName === 'suggest_activities') {
-    const suggestions = await suggestActivities(
-      input.city as string,
+    const city = input.city as string;
+    const raw = await suggestActivities(
+      city,
       (input.startDate as string | undefined) ?? tripStartDate ?? '',
       (input.endDate as string | undefined) ?? tripEndDate ?? '',
       input.prompt as string | undefined,
     );
-    return { content: JSON.stringify({ suggestions }), mutated: false };
+
+    // Remove permanently-closed places via Google Maps Places API
+    const suggestions = await filterOpenPlaces(raw, city);
+
+    // Auto-save new suggestions to the activities pool (deduplicated by name)
+    const existing = await loadActivities(tripId);
+    const poolActivities: Activity[] = existing?.savedActivities ?? [];
+    const destination = existing?.destination ?? tripDestination;
+    const existingNames = new Set(poolActivities.map((a) => a.name.toLowerCase()));
+
+    const toAdd: Activity[] = suggestions
+      .filter((s) => !existingNames.has(s.name.toLowerCase()))
+      .map((s) => ({ ...s, id: s.id ?? nanoid(12), saved: true, city: s.city || city }));
+
+    if (toAdd.length > 0) {
+      await saveActivities(tripId, destination, [...poolActivities, ...toAdd]);
+    }
+
+    // Return saved activities with saved=true and proper IDs so the AI can
+    // reference them in subsequent schedule_activity / reschedule_activity calls.
+    // For suggestions already in the pool, use their existing pool entry.
+    const savedSuggestions: Activity[] = suggestions.map((s) => {
+      const existing = poolActivities.find(
+        (p) => p.name.toLowerCase() === s.name.toLowerCase(),
+      );
+      if (existing) return existing;
+      return toAdd.find((a) => a.name.toLowerCase() === s.name.toLowerCase()) ?? { ...s, saved: true, city: s.city || city };
+    });
+
+    return { content: JSON.stringify({ suggestions: savedSuggestions }), mutated: toAdd.length > 0 };
   }
 
   if (toolName === 'set_budget_targets') {
@@ -378,7 +409,7 @@ export async function POST(
             // Read-only users cannot mutate activities
             if (
               !isOwner &&
-              ['add_activity', 'schedule_activity', 'reschedule_activity', 'remove_activity', 'set_budget_targets'].includes(
+              ['add_activity', 'schedule_activity', 'reschedule_activity', 'remove_activity', 'suggest_activities', 'set_budget_targets'].includes(
                 tc.name,
               )
             ) {
