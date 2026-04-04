@@ -27,6 +27,7 @@ import {
   getTrip,
   updateTripCoverPhoto,
 } from '@/services/db';
+import { prisma } from '@/lib/prisma';
 import { autoCreateLegs } from '@/services/legs';
 import { uploadArtifact } from '@/services/storage';
 import { fetchDestinationPhoto } from '@/services/photos';
@@ -57,7 +58,8 @@ export async function POST(request: Request) {
   const texts = formData.getAll('texts') as string[];
   const emailsJson = formData.get('emails') as string | null;
   const emails: GmailMessage[] = emailsJson ? (JSON.parse(emailsJson) as GmailMessage[]) : [];
-  const currency = (formData.get('currency') as string | null) ?? 'USD';
+  const profile = await prisma.profile.findUnique({ where: { id: userId }, select: { preferredCurrency: true } });
+  const currency = profile?.preferredCurrency ?? 'USD';
   const tripId = (formData.get('tripId') as string | null) ?? null;
   const tripName = (formData.get('tripName') as string | null) ?? '';
 

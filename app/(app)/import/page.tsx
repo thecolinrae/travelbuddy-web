@@ -11,7 +11,6 @@ import { FileUploadZone } from '@/components/import/FileUploadZone';
 import { TextPasteModal } from '@/components/import/TextPasteModal';
 import { GmailPickerPanel } from '@/components/import/GmailPickerPanel';
 import { ImportProgress } from '@/components/import/ImportProgress';
-import { COMMON_CURRENCIES } from '@/services/currency';
 import { Select } from '@/components/ui/select';
 import type { GmailMessage } from '@/services/gmail';
 import type { TripRow } from '@/services/db';
@@ -32,7 +31,6 @@ export default function ImportPage() {
   const router = useRouter();
   const [items, setItems] = useState<SourceItem[]>([]);
   const [tripName, setTripName] = useState('');
-  const [currency, setCurrency] = useState('USD');
   const [tripMode, setTripMode] = useState('new');
   const [existingTrips, setExistingTrips] = useState<TripRow[]>([]);
   const [textModalOpen, setTextModalOpen] = useState(false);
@@ -85,7 +83,6 @@ export default function ImportPage() {
     setProgress({ step: 'Preparing…', completed: 0, total: items.length });
 
     const formData = new FormData();
-    formData.set('currency', currency);
     if (tripName.trim()) formData.set('tripName', tripName.trim());
     if (tripMode !== 'new') formData.set('tripId', tripMode);
 
@@ -245,37 +242,20 @@ export default function ImportPage() {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="currency">Currency</Label>
-              <Select
-                id="currency"
-                value={currency}
-                onChange={(e) => setCurrency(e.target.value)}
-              >
-                {COMMON_CURRENCIES.map((c) => (
-                  <option key={c.code} value={c.code}>
-                    {c.code} — {c.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="trip-mode">Add to</Label>
-              <Select
-                id="trip-mode"
-                value={tripMode}
-                onChange={(e) => setTripMode(e.target.value)}
-              >
-                <option value="new">New trip</option>
-                {existingTrips.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="trip-mode">Add to</Label>
+            <Select
+              id="trip-mode"
+              value={tripMode}
+              onChange={(e) => setTripMode(e.target.value)}
+            >
+              <option value="new">New trip</option>
+              {existingTrips.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </Select>
           </div>
         </section>
 
