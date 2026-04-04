@@ -194,56 +194,55 @@ export function TripDetailClient({ trip, timeline, legs, activities: initialActi
         <div className="absolute top-4 right-4 flex gap-2">
           {isOwner && (
             <Button
-              size="sm"
+              size="icon"
               variant="ghost"
               onClick={() => setEditOpen(true)}
-              className="gap-1.5 text-white/90 hover:text-white hover:bg-white/15 border border-white/20"
+              aria-label="Edit trip"
+              className="h-8 w-8 text-white/90 hover:text-white hover:bg-white/15 border border-white/20"
             >
               <Pencil className="h-4 w-4" />
-              Edit
             </Button>
           )}
           {isOwner && (
             <Button
-              size="sm"
+              size="icon"
               variant="ghost"
               onClick={() => setShareOpen(true)}
-              className="gap-1.5 text-white/90 hover:text-white hover:bg-white/15 border border-white/20"
+              aria-label="Share trip"
+              className="h-8 w-8 text-white/90 hover:text-white hover:bg-white/15 border border-white/20"
             >
               <Share2 className="h-4 w-4" />
-              Share
             </Button>
           )}
           {hasTransport && (
             <Button
               asChild
-              size="sm"
+              size="icon"
               variant="ghost"
-              className="gap-1.5 text-white/90 hover:text-white hover:bg-white/15 border border-white/20"
+              className="h-8 w-8 text-white/90 hover:text-white hover:bg-white/15 border border-white/20"
             >
-              <Link href={`/trip/${trip.id}/transport`}>
+              <Link href={`/trip/${trip.id}/transport`} aria-label="View transport">
                 <Route className="h-4 w-4" />
-                Transport
               </Link>
             </Button>
           )}
           <Button
             asChild
-            size="sm"
+            size="icon"
             variant="ghost"
-            className="gap-1.5 text-white/90 hover:text-white hover:bg-white/15 border border-white/20"
+            className="h-8 w-8 text-white/90 hover:text-white hover:bg-white/15 border border-white/20"
           >
-            <Link href={`/import?tripId=${trip.id}`}>
+            <Link href={`/import?tripId=${trip.id}`} aria-label="Add documents">
               <Plus className="h-4 w-4" />
-              Add docs
             </Link>
           </Button>
           {isOwner && (
             <Button
-              size="sm"
+              size="icon"
               variant="ghost"
               onClick={() => setDeleteConfirm(true)}
-              className="text-white/70 hover:text-white hover:bg-white/15 border border-white/20"
+              aria-label="Delete trip"
+              className="h-8 w-8 text-white/70 hover:text-white hover:bg-white/15 border border-white/20"
             >
               <Trash2 className="h-4 w-4" />
             </Button>
