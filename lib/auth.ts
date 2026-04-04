@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { activatePendingShares } from '@/services/db';
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  trustHost: true,
   providers: [
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID!,
