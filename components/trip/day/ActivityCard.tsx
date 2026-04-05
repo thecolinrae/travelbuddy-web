@@ -1,23 +1,42 @@
 'use client';
 
 import { useState } from 'react';
-import { Info, DollarSign, Clock, MapPin } from 'lucide-react';
+import { Info, DollarSign, Clock, MapPin, CheckCircle2, Sparkles } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { fmt12 } from './utils';
 import { CategoryIcon } from '@/components/trip/activityIcons';
 import { ActivityDetailSheet } from './ActivityDetailSheet';
 import { EventDetailSheet } from './EventDetailSheet';
-import type { ActivityEvent, Activity } from '@/types';
+import type { ActivityEvent, Activity, TimelineEvent } from '@/types';
 
 // ─── Timeline ActivityEvent (confirmed booking) ───────────────────────────────
 
 interface ActivityEventCardProps {
   event: ActivityEvent;
+  linkedActivity?: Activity;
+  // Props forwarded to EventDetailSheet for link/unlink actions
+  tripId?: string;
+  activities?: Activity[];
+  timeline?: ActivityEvent[];
+  isOwner?: boolean;
+  onActivityUpdate?: (updated: Activity[]) => void;
 }
 
-export function ActivityEventCard({ event }: ActivityEventCardProps) {
+export function ActivityEventCard({
+  event,
+  linkedActivity,
+  tripId,
+  activities,
+  timeline,
+  isOwner,
+  onActivityUpdate,
+}: ActivityEventCardProps) {
   const [open, setOpen] = useState(false);
-  const highlights = event.highlights?.slice(0, 4) ?? [];
+
+  // Merge enrichment: prefer event's own data, fall back to linked activity
+  const tips = event.tips || linkedActivity?.tips;
+  const duration = event.duration || linkedActivity?.duration;
+  const highlights = (event.highlights?.length ? event.highlights : linkedActivity?.highlights)?.slice(0, 4) ?? [];
 
   return (
     <>
@@ -26,9 +45,22 @@ export function ActivityEventCard({ event }: ActivityEventCardProps) {
           <CategoryIcon type={event.category} />
           <div className="min-w-0 flex-1">
             <p className="font-medium text-text-base leading-snug">{event.description}</p>
-            <p className="text-xs text-text-muted mt-0.5 capitalize">
-              {event.category}{event.duration ? ` · ${event.duration}` : ''}
-            </p>
+            {linkedActivity ? (
+              <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                <span className="inline-flex items-center gap-1 rounded-full border border-green-200 bg-green-50 px-2 py-0.5 text-xs text-green-700 dark:border-green-800 dark:bg-green-900/20 dark:text-green-400">
+                  <CheckCircle2 className="h-3 w-3" />
+                  Confirmed
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-text-muted">
+                  <Sparkles className="h-3 w-3" />
+                  Enriched
+                </span>
+              </div>
+            ) : (
+              <p className="text-xs text-text-muted mt-0.5 capitalize">
+                {event.category}{duration ? ` · ${duration}` : ''}
+              </p>
+            )}
           </div>
           {event.time && (
             <span className="text-xs text-text-muted shrink-0 tabular-nums">{fmt12(event.time)}</span>
@@ -42,8 +74,12 @@ export function ActivityEventCard({ event }: ActivityEventCardProps) {
           </button>
         </div>
 
-        {event.tips && (
-          <p className="text-sm text-text-muted italic leading-relaxed">{event.tips}</p>
+        {linkedActivity && duration && (
+          <p className="text-xs text-text-muted capitalize">{event.category} · {duration}</p>
+        )}
+
+        {tips && (
+          <p className="text-sm text-text-muted italic leading-relaxed">{tips}</p>
         )}
 
         {highlights.length > 0 && (
@@ -61,7 +97,17 @@ export function ActivityEventCard({ event }: ActivityEventCardProps) {
           <p className="text-xs text-text-muted text-right">{event.bookingRef}</p>
         )}
       </div>
-      <EventDetailSheet open={open} onOpenChange={setOpen} event={event} />
+      <EventDetailSheet
+        open={open}
+        onOpenChange={setOpen}
+        event={event}
+        tripId={tripId}
+        activities={activities}
+        timeline={timeline}
+        isOwner={isOwner}
+        onActivityUpdate={onActivityUpdate}
+        linkedActivity={linkedActivity}
+      />
     </>
   );
 }
@@ -72,6 +118,7 @@ interface ScheduledActivityCardProps {
   activity: Activity;
   tripId: string;
   activities: Activity[];
+  timeline?: ActivityEvent[];
   isOwner: boolean;
   onActivityUpdate: (updated: Activity[]) => void;
 }
@@ -80,6 +127,7 @@ export function ScheduledActivityCard({
   activity,
   tripId,
   activities,
+  timeline,
   isOwner,
   onActivityUpdate,
 }: ScheduledActivityCardProps) {
@@ -148,6 +196,7 @@ export function ScheduledActivityCard({
         activity={activity}
         tripId={tripId}
         activities={activities}
+        timeline={timeline}
         isOwner={isOwner}
         onActivityUpdate={onActivityUpdate}
       />

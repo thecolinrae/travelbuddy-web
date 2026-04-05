@@ -1,4 +1,4 @@
-import type { TimelineEvent, Activity } from '@/types';
+import type { TimelineEvent, Activity, ActivityEvent } from '@/types';
 
 // ─── DayItem discriminated union ─────────────────────────────────────────────
 
@@ -149,8 +149,19 @@ export function buildDayItems(
       items.push({ kind: 'timeline', event });
     }
   }
+
+  // Suppress activities whose linked event falls on this date —
+  // the enriched ActivityEventCard replaces them in the day view.
+  const linkedActivityIds = new Set<string>();
+  for (const event of timeline) {
+    if (event.type === 'activity' && event.date === date) {
+      const linked = (event as ActivityEvent).linkedActivityId;
+      if (linked) linkedActivityIds.add(linked);
+    }
+  }
+
   for (const activity of activities) {
-    if (activity.scheduledDate === date) {
+    if (activity.scheduledDate === date && !linkedActivityIds.has(activity.id)) {
       items.push({ kind: 'activity', activity });
     }
   }

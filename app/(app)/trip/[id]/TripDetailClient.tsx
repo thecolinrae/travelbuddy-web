@@ -28,6 +28,7 @@ import { CityMapView } from '@/components/trip/map/CityMapView';
 import type { ArtifactInfo } from '@/components/trip/DocumentsTab';
 import type { TimelineEvent, Activity, BudgetItemCategory, ImportWarning } from '@/types';
 import type { LegSummary } from '@/components/trip/DayTab';
+import type { LabelSync } from '@/services/db';
 
 type TabId =
   | 'day'
@@ -72,6 +73,7 @@ interface Props {
   legs: LegSummary[];
   activities: Activity[];
   artifacts: ArtifactInfo[];
+  labelSyncs: LabelSync[];
   isOwner: boolean;
 }
 
@@ -85,7 +87,7 @@ function formatDateRange(start: string | null, end: string | null): string {
   return fmt((start ?? end)!);
 }
 
-export function TripDetailClient({ trip, timeline, legs, activities: initialActivities, artifacts, isOwner }: Props) {
+export function TripDetailClient({ trip, timeline, legs, activities: initialActivities, artifacts, labelSyncs, isOwner }: Props) {
   const router = useRouter();
   const TABS = buildTabs(trip.status);
   const [activeTab, setActiveTab] = useState<TabId>('day');
@@ -371,6 +373,7 @@ export function TripDetailClient({ trip, timeline, legs, activities: initialActi
             artifacts={artifacts}
             tripId={trip.id}
             isOwner={isOwner}
+            labelSyncs={labelSyncs}
           />
         )}
         {activeTab === 'notes' && (

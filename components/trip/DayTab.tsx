@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CalendarDays, Route, UtensilsCrossed, List } from 'lucide-react';
 import { DayMapPanel } from '@/components/trip/map/DayMapPanel';
 import { Button } from '@/components/ui/button';
@@ -10,13 +10,15 @@ import { FlightCard } from './day/FlightCard';
 import { HotelCard } from './day/HotelCard';
 import { TransportCard } from './day/TransportCard';
 import { ActivityEventCard, ScheduledActivityCard } from './day/ActivityCard';
+import { MergeSuggestionChip } from './day/MergeActivityModal';
 import {
   buildDayRange,
   buildDayItems,
   injectNowIndicator,
   type DayItem,
 } from './day/utils';
-import type { TimelineEvent, Activity } from '@/types';
+import { findMergeCandidates } from '@/services/activityMerge';
+import type { TimelineEvent, Activity, ActivityEvent } from '@/types';
 
 interface TripSnapshot {
   startDate: string | null;
@@ -91,6 +93,7 @@ function PlanThisDayStub() {
 interface RenderContext {
   tripId: string;
   activities: Activity[];
+  timeline: ActivityEvent[];
   isOwner: boolean;
   onActivityUpdate: (updated: Activity[]) => void;
 }
@@ -119,6 +122,7 @@ function renderItem(
         activity={item.activity}
         tripId={ctx.tripId}
         activities={ctx.activities}
+        timeline={ctx.timeline}
         isOwner={ctx.isOwner}
         onActivityUpdate={ctx.onActivityUpdate}
       />
@@ -132,7 +136,20 @@ function renderItem(
     } else if (e.type === 'otherTransportation') {
       card = <TransportCard event={e} />;
     } else if (e.type === 'activity') {
-      card = <ActivityEventCard event={e} />;
+      const linkedActivity = e.linkedActivityId
+        ? ctx.activities.find((a) => a.id === e.linkedActivityId)
+        : undefined;
+      card = (
+        <ActivityEventCard
+          event={e}
+          linkedActivity={linkedActivity}
+          tripId={ctx.tripId}
+          activities={ctx.activities}
+          timeline={ctx.timeline}
+          isOwner={ctx.isOwner}
+          onActivityUpdate={ctx.onActivityUpdate}
+        />
+      );
     } else {
       return null;
     }
@@ -192,8 +209,23 @@ function buildSegments(items: DayItem[], legNameById: Map<string, string | null>
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
+function getItemId(item: DayItem): string | null {
+  if (item.kind === 'activity') return item.activity.id;
+  if (item.kind === 'timeline') return item.event.id;
+  return null;
+}
+
 export function DayTab({ trip, tripId, timeline, activities, legs, isOwner, currentIndex, onIndexChange, onViewTimeline, onActivityUpdate }: DayTabProps) {
   const [mapOpen, setMapOpen] = useState(false);
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  // Pairs dismissed by the user for this session ("activityId|eventId")
+  const [dismissedPairs, setDismissedPairs] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!selectedItemId) return;
+    const el = document.querySelector(`[data-item-id="${selectedItemId}"]`);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [selectedItemId]);
 
   // Build a map of legId → leg name for grouping transport events
   const legNameById = new Map<string, string | null>(
@@ -235,6 +267,23 @@ export function DayTab({ trip, tripId, timeline, activities, legs, isOwner, curr
 
   const segments = buildSegments(items, legNameById);
 
+  // ActivityEvent subset for this day (used by detail sheets + merge suggestions)
+  const dayActivityEvents = timeline.filter(
+    (e): e is ActivityEvent => e.type === 'activity' && e.date === selectedDay,
+  );
+
+  // Compute merge suggestions for unlinked pairs on this day (owner only)
+  const dayPlannedActivities = items
+    .filter((i): i is { kind: 'activity'; activity: Activity } => i.kind === 'activity')
+    .map((i) => i.activity);
+  const suggestionMap = new Map(
+    (isOwner
+      ? findMergeCandidates(dayPlannedActivities, dayActivityEvents)
+          .filter((c) => !c.autoMerge && !dismissedPairs.has(`${c.activity.id}|${c.event.id}`))
+      : []
+    ).map((c) => [c.activity.id, c]),
+  );
+
   return (
     <div className="space-y-4">
       <DayNav
@@ -256,6 +305,8 @@ export function DayTab({ trip, tripId, timeline, activities, legs, isOwner, curr
             .map((i) => (i.kind === 'activity' ? i.activity.id : i.event.id))
             .join(',')}`}
           items={items}
+          selectedId={selectedItemId ?? undefined}
+          onSelect={setSelectedItemId}
         />
       )}
 
@@ -271,9 +322,29 @@ export function DayTab({ trip, tripId, timeline, activities, legs, isOwner, curr
               item.kind === 'now' ? 'now'
               : item.kind === 'activity' ? item.activity.id
               : item.event.id;
+            const itemId = getItemId(item);
+            const isSelected = !!itemId && selectedItemId === itemId;
             return (
-              <div key={key}>
-                {renderItem(item, isPast, isFirstFuture, nowTime, { tripId, activities, isOwner, onActivityUpdate })}
+              <div
+                key={key}
+                data-item-id={itemId ?? key}
+                className={isSelected ? 'rounded-xl ring-2 ring-primary/60 transition-shadow' : ''}
+              >
+                {renderItem(item, isPast, isFirstFuture, nowTime, { tripId, activities, timeline: dayActivityEvents, isOwner, onActivityUpdate })}
+                {item.kind === 'activity' && suggestionMap.has(item.activity.id) && (
+                  <MergeSuggestionChip
+                    candidate={suggestionMap.get(item.activity.id)!}
+                    tripId={tripId}
+                    onDismiss={() =>
+                      setDismissedPairs((prev) => {
+                        const next = new Set(prev);
+                        const c = suggestionMap.get(item.activity.id)!;
+                        next.add(`${c.activity.id}|${c.event.id}`);
+                        return next;
+                      })
+                    }
+                  />
+                )}
               </div>
             );
           }
@@ -291,9 +362,15 @@ export function DayTab({ trip, tripId, timeline, activities, legs, isOwner, curr
                   const isPast = isToday && nowIndex !== -1 && idx < nowIndex;
                   const isFirstFuture = isToday && idx === firstFutureIndex;
                   const key = item.kind === 'activity' ? item.activity.id : (item.kind === 'timeline' ? item.event.id : 'now');
+                  const itemId = getItemId(item);
+                  const isSelected = !!itemId && selectedItemId === itemId;
                   return (
-                    <div key={key}>
-                      {renderItem(item, false, isFirstFuture, nowTime, { tripId, activities, isOwner, onActivityUpdate })}
+                    <div
+                      key={key}
+                      data-item-id={itemId ?? key}
+                      className={isSelected ? 'rounded-xl ring-2 ring-primary/60 transition-shadow' : ''}
+                    >
+                      {renderItem(item, false, isFirstFuture, nowTime, { tripId, activities, timeline: dayActivityEvents, isOwner, onActivityUpdate })}
                     </div>
                   );
                 })}

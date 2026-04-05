@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  Loader2, DollarSign, Clock, MapPin, Sun, Users, Sparkles, Info,
+  Loader2, DollarSign, Clock, MapPin, Sun, Users, Sparkles, Info, Pencil, Link2, Unlink,
 } from 'lucide-react';
 import {
   Sheet,
@@ -15,7 +15,10 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { CategoryIcon } from '@/components/trip/activityIcons';
 import { toActivityType } from '@/components/trip/activities/activityTypeUtils';
-import type { Activity } from '@/types';
+import { ActivityEditModal } from '@/components/trip/activities/ActivityEditModal';
+import { MergeActivityModal } from './MergeActivityModal';
+import { findMergeCandidates } from '@/services/activityMerge';
+import type { Activity, ActivityEvent } from '@/types';
 import type { EnrichedActivityResult } from '@/services/claude';
 
 interface ActivityDetailSheetProps {
@@ -24,6 +27,8 @@ interface ActivityDetailSheetProps {
   activity: Activity;
   tripId: string;
   activities: Activity[];
+  /** ActivityEvents on the same day — used for link/unlink actions */
+  timeline?: ActivityEvent[];
   isOwner: boolean;
   onActivityUpdate: (updated: Activity[]) => void;
 }
@@ -40,6 +45,7 @@ export function ActivityDetailSheet({
   activity,
   tripId,
   activities,
+  timeline,
   isOwner,
   onActivityUpdate,
 }: ActivityDetailSheetProps) {
@@ -47,6 +53,9 @@ export function ActivityDetailSheet({
   const [live, setLive] = useState<Activity>(activity);
   const [enriching, setEnriching] = useState(false);
   const [enrichError, setEnrichError] = useState<string | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [unlinking, setUnlinking] = useState(false);
 
   // Sync live copy when a different activity is opened
   useEffect(() => {
@@ -72,6 +81,12 @@ export function ActivityDetailSheet({
     live.familyFriendly !== undefined ||
     !!live.tips ||
     (live.highlights && live.highlights.length > 0);
+
+  // Find candidate events to link to (when not already linked)
+  const candidateEvents =
+    isOwner && !live.linkedEventId && timeline
+      ? findMergeCandidates([live], timeline).map((c) => c.event)
+      : [];
 
   async function handleEnrich() {
     setEnriching(true);
@@ -113,6 +128,25 @@ export function ActivityDetailSheet({
       setEnrichError("Couldn't fetch details. Try again.");
     } finally {
       setEnriching(false);
+    }
+  }
+
+  async function handleUnlink() {
+    if (!live.linkedEventId) return;
+    setUnlinking(true);
+    try {
+      await fetch(`/api/trips/${tripId}/activities/merge`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ activityId: live.id, eventId: live.linkedEventId }),
+      });
+      const unlinked = { ...live, linkedEventId: undefined };
+      setLive(unlinked);
+      const updatedList = activities.map((a) => (a.id === unlinked.id ? unlinked : a));
+      onActivityUpdate(updatedList);
+      router.refresh();
+    } finally {
+      setUnlinking(false);
     }
   }
 
@@ -221,6 +255,31 @@ export function ActivityDetailSheet({
             </section>
           )}
 
+          {/* Booking link status */}
+          {isOwner && live.linkedEventId && (
+            <section className="space-y-2">
+              <SectionLabel>Booking</SectionLabel>
+              <div className="rounded-xl border bg-card px-3 py-2.5 flex items-center gap-2">
+                <CategoryIcon type={live.type} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-text-base leading-snug">Linked to booking</p>
+                  <p className="text-xs text-text-muted">This activity is confirmed</p>
+                </div>
+                <button
+                  onClick={handleUnlink}
+                  disabled={unlinking}
+                  className="text-xs text-text-muted hover:text-destructive transition-colors flex items-center gap-1 shrink-0"
+                >
+                  {unlinking
+                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    : <Unlink className="h-3.5 w-3.5" />
+                  }
+                  Unlink
+                </button>
+              </div>
+            </section>
+          )}
+
           {/* Empty state */}
           {!hasDetails && !needsEnrich && (
             <div className="py-8 flex flex-col items-center gap-3 text-center">
@@ -257,7 +316,65 @@ export function ActivityDetailSheet({
             </div>
           )}
         </div>
+
+        {isOwner && (
+          <div className="shrink-0 border-t pt-4 space-y-2">
+            {/* Link to booking — shown when there are matching events and not already linked */}
+            {!live.linkedEventId && candidateEvents.length > 0 && (
+              <Button
+                variant="outline"
+                onClick={() => setMergeOpen(true)}
+                className="w-full gap-2"
+              >
+                <Link2 className="h-4 w-4" />
+                Link to booking
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              onClick={() => setEditOpen(true)}
+              className="w-full gap-2"
+            >
+              <Pencil className="h-4 w-4" />
+              Edit activity
+            </Button>
+          </div>
+        )}
       </SheetContent>
+
+      {editOpen && (
+        <ActivityEditModal
+          activity={live}
+          onSave={async (updated) => {
+            setLive(updated);
+            const updatedList = activities.map((a) => (a.id === updated.id ? updated : a));
+            await fetch(`/api/trips/${tripId}/activities`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ activities: updatedList }),
+            });
+            onActivityUpdate(updatedList);
+            router.refresh();
+            setEditOpen(false);
+          }}
+          onClose={() => setEditOpen(false)}
+        />
+      )}
+
+      {mergeOpen && candidateEvents[0] && (
+        <MergeActivityModal
+          open={mergeOpen}
+          onOpenChange={setMergeOpen}
+          tripId={tripId}
+          activity={live}
+          event={candidateEvents[0]}
+          onMerged={() => {
+            const updated = { ...live, linkedEventId: candidateEvents[0].id };
+            setLive(updated);
+            onActivityUpdate(activities.map((a) => (a.id === updated.id ? updated : a)));
+          }}
+        />
+      )}
     </Sheet>
   );
 }

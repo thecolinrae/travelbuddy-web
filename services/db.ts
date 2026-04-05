@@ -218,15 +218,31 @@ export async function loadActivities(
 
 // ─── Artifacts ────────────────────────────────────────────────────────────────
 
+export interface GmailArtifactMeta {
+  gmailMessageId?: string;
+  gmailLabelId?: string;
+  gmailLabelName?: string;
+}
+
 export async function createArtifactRecord(
   tripId: string,
   fileName: string,
   mimeType: string,
   storagePath: string,
   size: number,
+  gmail?: GmailArtifactMeta,
 ): Promise<{ id: string }> {
   return prisma.artifact.create({
-    data: { tripId, fileName, mimeType, storagePath, size: BigInt(size) },
+    data: {
+      tripId,
+      fileName,
+      mimeType,
+      storagePath,
+      size: BigInt(size),
+      ...(gmail?.gmailMessageId && { gmailMessageId: gmail.gmailMessageId }),
+      ...(gmail?.gmailLabelId && { gmailLabelId: gmail.gmailLabelId }),
+      ...(gmail?.gmailLabelName && { gmailLabelName: gmail.gmailLabelName }),
+    },
     select: { id: true },
   });
 }
@@ -240,12 +256,60 @@ export interface ArtifactRecord {
   createdAt: Date;
 }
 
+export interface LabelSync {
+  labelId: string;
+  labelName: string;
+  count: number;
+  lastSyncAt: string; // ISO string
+}
+
 export async function listArtifacts(tripId: string): Promise<ArtifactRecord[]> {
   return prisma.artifact.findMany({
     where: { tripId },
     orderBy: { createdAt: 'desc' },
     select: { id: true, fileName: true, mimeType: true, storagePath: true, size: true, createdAt: true },
   });
+}
+
+export async function listLabelSyncs(tripId: string): Promise<LabelSync[]> {
+  const rows = await prisma.artifact.findMany({
+    where: { tripId, gmailLabelId: { not: null } },
+    select: { gmailLabelId: true, gmailLabelName: true, createdAt: true },
+    orderBy: { createdAt: 'desc' },
+  });
+  // Group by labelId in JS
+  const map = new Map<string, { labelName: string; count: number; lastSyncAt: Date }>();
+  for (const row of rows) {
+    if (!row.gmailLabelId) continue;
+    const existing = map.get(row.gmailLabelId);
+    if (!existing) {
+      map.set(row.gmailLabelId, {
+        labelName: row.gmailLabelName ?? row.gmailLabelId,
+        count: 1,
+        lastSyncAt: row.createdAt,
+      });
+    } else {
+      existing.count += 1;
+      // rows are ordered desc so the first hit is already the most recent
+    }
+  }
+  return Array.from(map.entries()).map(([labelId, v]) => ({
+    labelId,
+    labelName: v.labelName,
+    count: v.count,
+    lastSyncAt: v.lastSyncAt.toISOString(),
+  }));
+}
+
+export async function getImportedGmailIds(
+  tripId: string,
+  labelId: string,
+): Promise<Set<string>> {
+  const rows = await prisma.artifact.findMany({
+    where: { tripId, gmailLabelId: labelId, gmailMessageId: { not: null } },
+    select: { gmailMessageId: true },
+  });
+  return new Set(rows.map((r) => r.gmailMessageId!));
 }
 
 export async function getArtifact(

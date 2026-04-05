@@ -252,6 +252,7 @@ export interface ActivityEvent extends BaseTimelineEvent {
   tips?: string;
   familyFriendly?: boolean;
   highlights?: string[];
+  linkedActivityId?: string;  // ID of the Activity this event is merged with
 }
 
 export type TimelineEvent =
@@ -341,4 +342,5 @@ export interface Activity {
   familyFriendly?: boolean;
   highlights?: string[];
   importSource?: 'kml' | 'takeout';
+  linkedEventId?: string;   // ID of the ActivityEvent this activity is merged with
 }

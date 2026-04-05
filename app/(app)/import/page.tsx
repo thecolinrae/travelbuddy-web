@@ -37,6 +37,7 @@ export default function ImportPage() {
   const [gmailOpen, setGmailOpen] = useState(false);
   const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState<ProgressState | null>(null);
+  const [emailLabel, setEmailLabel] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
     fetch('/api/trips')
@@ -66,13 +67,14 @@ export default function ImportPage() {
     setItems((prev) => [...prev, { kind: 'text', text, label, id: nanoid(8) }]);
   }, []);
 
-  const addEmails = useCallback((emails: GmailMessage[]) => {
+  const addEmails = useCallback((emails: GmailMessage[], label?: { id: string; name: string }) => {
     setItems((prev) => [
       ...prev,
       ...emails
         .filter((e) => !prev.some((i) => i.kind === 'email' && i.email.id === e.id))
         .map((e) => ({ kind: 'email' as const, email: e, id: nanoid(8) })),
     ]);
+    if (label) setEmailLabel(label);
   }, []);
 
   const removeItem = (id: string) => setItems((prev) => prev.filter((i) => i.id !== id));
@@ -92,7 +94,13 @@ export default function ImportPage() {
       else if (item.kind === 'text') formData.append('texts', item.text);
       else emailItems.push(item.email);
     }
-    if (emailItems.length) formData.set('emails', JSON.stringify(emailItems));
+    if (emailItems.length) {
+      formData.set('emails', JSON.stringify(emailItems));
+      if (emailLabel) {
+        formData.set('labelId', emailLabel.id);
+        formData.set('labelName', emailLabel.name);
+      }
+    }
 
     try {
       const response = await fetch('/api/parse', { method: 'POST', body: formData });
@@ -170,7 +178,7 @@ export default function ImportPage() {
       <main className="max-w-2xl mx-auto px-4 py-8 flex flex-col" style={{ height: 'calc(100vh - 4rem)' }}>
         <GmailPickerPanel
           onBack={() => setGmailOpen(false)}
-          onSelect={(emails) => { addEmails(emails); setGmailOpen(false); }}
+          onSelect={(emails, label) => { addEmails(emails, label); setGmailOpen(false); }}
         />
       </main>
     );

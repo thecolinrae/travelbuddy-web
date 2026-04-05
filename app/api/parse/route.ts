@@ -62,6 +62,8 @@ export async function POST(request: Request) {
   const currency = profile?.preferredCurrency ?? 'USD';
   const tripId = (formData.get('tripId') as string | null) ?? null;
   const tripName = (formData.get('tripName') as string | null) ?? '';
+  const labelId = (formData.get('labelId') as string | null) ?? undefined;
+  const labelName = (formData.get('labelName') as string | null) ?? undefined;
 
   const tasks: ParseTask[] = [
     ...files.map((f) => ({ kind: 'file' as const, file: f })),
@@ -232,6 +234,35 @@ export async function POST(request: Request) {
 
         await saveTimeline(savedTripId, timeline);
 
+        // Auto-link activity bank entries to matching ActivityEvents (non-fatal)
+        try {
+          const activitiesData = await loadActivities(savedTripId);
+          const savedActivities = activitiesData?.savedActivities ?? [];
+          const activityEvents = timeline.filter(
+            (e): e is import('@/types').ActivityEvent => e.type === 'activity',
+          );
+          if (savedActivities.length > 0 && activityEvents.length > 0) {
+            const { findMergeCandidates } = await import('@/services/activityMerge');
+            const autoMerges = findMergeCandidates(savedActivities, activityEvents).filter(
+              (c) => c.autoMerge,
+            );
+            if (autoMerges.length > 0) {
+              for (const { activity, event } of autoMerges) {
+                if (!activity.linkedEventId && !event.linkedActivityId) {
+                  activity.linkedEventId = event.id;
+                  event.linkedActivityId = activity.id;
+                }
+              }
+              await Promise.all([
+                saveActivities(savedTripId, activitiesData?.destination ?? '', savedActivities),
+                saveTimeline(savedTripId, timeline),
+              ]);
+            }
+          }
+        } catch {
+          // Auto-merge failure is non-fatal — user can link manually
+        }
+
         // Auto-create transport legs for any new journeyId groups (non-fatal)
         try {
           await autoCreateLegs(savedTripId);
@@ -266,7 +297,11 @@ export async function POST(request: Request) {
               .slice(0, 60) || 'email';
             const fileName = `${safeName}.html`;
             const storagePath = await uploadArtifact(buffer, fileName, 'text/html', savedTripId);
-            await createArtifactRecord(savedTripId, fileName, 'text/html', storagePath, buffer.length);
+            await createArtifactRecord(savedTripId, fileName, 'text/html', storagePath, buffer.length, {
+              gmailMessageId: email.id,
+              gmailLabelId: labelId,
+              gmailLabelName: labelName,
+            });
           } catch {
             // non-fatal
           }

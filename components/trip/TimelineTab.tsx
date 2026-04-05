@@ -15,7 +15,8 @@ import { Button } from '@/components/ui/button';
 import { CategoryIcon } from '@/components/trip/activityIcons';
 import { ActivityEditModal } from './activities/ActivityEditModal';
 import { EventFormModal, type TransportPrefill } from './EventFormModal';
-import type { TimelineEvent, ExpenseEvent, TransportType, TransportDepartureEvent, TransportArrivalEvent, Activity } from '@/types';
+import type { TimelineEvent, ExpenseEvent, TransportType, TransportDepartureEvent, TransportArrivalEvent, Activity, ActivityEvent } from '@/types';
+import { nanoid } from '@/services/nanoid';
 
 const TRANSPORT_ICONS: Record<TransportType, React.ComponentType<{ className?: string }>> = {
   bus: Bus,
@@ -205,7 +206,7 @@ export function TimelineTab({ tripId, timeline, activities, isOwner }: Props) {
     // Assign a journeyId to the existing event if it doesn't have one yet,
     // so the new counterpart will be linked to it.
     if (!journeyId) {
-      journeyId = crypto.randomUUID();
+      journeyId = nanoid();
       await fetch(`/api/trips/${tripId}/timeline/${e.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -234,8 +235,18 @@ export function TimelineTab({ tripId, timeline, activities, isOwner }: Props) {
     byDate.get(day)!.push(e);
   }
 
-  // Merge scheduled saved activities into the same date buckets
-  const scheduledActivities = activities.filter((a) => a.saved && a.scheduledDate);
+  // Merge scheduled saved activities into the same date buckets.
+  // Skip activities that are linked to a timeline event — those are
+  // absorbed into the ActivityEventCard and should not appear separately.
+  const linkedActivityIds = new Set(
+    timeline
+      .filter((e): e is ActivityEvent => e.type === 'activity')
+      .map((e) => e.linkedActivityId)
+      .filter((id): id is string => !!id),
+  );
+  const scheduledActivities = activities.filter(
+    (a) => a.saved && a.scheduledDate && !linkedActivityIds.has(a.id),
+  );
   const activitiesByDate = new Map<string, Activity[]>();
   for (const a of scheduledActivities) {
     const day = a.scheduledDate!;

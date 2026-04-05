@@ -114,17 +114,21 @@ model Activities {
 // ── Uploaded artifact files ──────────────────────────────────────────────────
 
 model Artifact {
-  id          String   @id @default(cuid())
-  tripId      String
-  fileName    String
-  mimeType    String
-  storagePath String                            // S3 object key: artifacts/{tripId}/{fileName}
-  size        BigInt?
-  createdAt   DateTime @default(now())
+  id             String   @id @default(cuid())
+  tripId         String
+  fileName       String
+  mimeType       String
+  storagePath    String                         // S3 object key: artifacts/{tripId}/{fileName}
+  size           BigInt?
+  gmailMessageId String?                        // Gmail message ID — set when artifact came from a Gmail import
+  gmailLabelId   String?                        // Gmail label ID — set when artifact came from a label import
+  gmailLabelName String?                        // Human-readable label name at time of import
+  createdAt      DateTime @default(now())
 
-  trip        Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  trip           Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
 
   @@index([tripId])
+  @@index([tripId, gmailLabelId])
 }
 
 // ── Trip sharing ─────────────────────────────────────────────────────────────

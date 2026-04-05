@@ -131,6 +131,7 @@ export function EventFormModal({ tripId, open, onClose, onSaved, editing, transp
       : null;
   const hotelBase = hi ?? ho;
   const [hotelName, setHotelName] = useState(hotelBase?.hotelName ?? '');
+  const [hotelAddress, setHotelAddress] = useState(editing?.locationAddress ?? '');
   const [hotelBookingRef, setHotelBookingRef] = useState(hotelBase?.bookingRef ?? '');
 
   // ── Hotel check-in specific ───────────────────────────────────────────────────
@@ -199,6 +200,7 @@ export function EventFormModal({ tripId, open, onClose, onSaved, editing, transp
         type: 'hotel',
         subtype: 'check_in',
         hotelName: hotelName.trim(),
+        locationAddress: hotelAddress.trim() || undefined,
         checkoutDate: checkoutDate || date,
         checkoutTime: checkoutTime || undefined,
         breakfastIncluded,
@@ -216,6 +218,7 @@ export function EventFormModal({ tripId, open, onClose, onSaved, editing, transp
         type: 'hotel',
         subtype: 'check_out',
         hotelName: hotelName.trim(),
+        locationAddress: hotelAddress.trim() || undefined,
         bookingRef: hotelBookingRef.trim() || undefined,
       } as Omit<HotelCheckOutEvent, 'id'>;
     }
@@ -758,14 +761,25 @@ export function EventFormModal({ tripId, open, onClose, onSaved, editing, transp
                   placeholder="e.g. The Ritz London"
                 />
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="ev-hi-city">City</Label>
-                <Input
-                  id="ev-hi-city"
-                  value={locationCity}
-                  onChange={(e) => setLocationCity(e.target.value)}
-                  placeholder="e.g. London"
-                />
+              <div className="flex gap-3">
+                <div className="space-y-1.5 flex-1">
+                  <Label htmlFor="ev-hi-city">City</Label>
+                  <Input
+                    id="ev-hi-city"
+                    value={locationCity}
+                    onChange={(e) => setLocationCity(e.target.value)}
+                    placeholder="e.g. London"
+                  />
+                </div>
+                <div className="space-y-1.5 flex-1">
+                  <Label htmlFor="ev-hi-addr">Address (optional)</Label>
+                  <Input
+                    id="ev-hi-addr"
+                    value={hotelAddress}
+                    onChange={(e) => setHotelAddress(e.target.value)}
+                    placeholder="e.g. 15 Piccadilly"
+                  />
+                </div>
               </div>
               <div className="flex gap-3">
                 <div className="space-y-1.5 flex-1">
@@ -841,14 +855,25 @@ export function EventFormModal({ tripId, open, onClose, onSaved, editing, transp
                   placeholder="e.g. The Ritz London"
                 />
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="ev-ho-city">City</Label>
-                <Input
-                  id="ev-ho-city"
-                  value={locationCity}
-                  onChange={(e) => setLocationCity(e.target.value)}
-                  placeholder="e.g. London"
-                />
+              <div className="flex gap-3">
+                <div className="space-y-1.5 flex-1">
+                  <Label htmlFor="ev-ho-city">City</Label>
+                  <Input
+                    id="ev-ho-city"
+                    value={locationCity}
+                    onChange={(e) => setLocationCity(e.target.value)}
+                    placeholder="e.g. London"
+                  />
+                </div>
+                <div className="space-y-1.5 flex-1">
+                  <Label htmlFor="ev-ho-addr">Address (optional)</Label>
+                  <Input
+                    id="ev-ho-addr"
+                    value={hotelAddress}
+                    onChange={(e) => setHotelAddress(e.target.value)}
+                    placeholder="e.g. 15 Piccadilly"
+                  />
+                </div>
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="ev-ho-bref">Booking ref (optional)</Label>

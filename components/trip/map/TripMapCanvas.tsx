@@ -8,9 +8,11 @@ import { API_KEY, loadMaps, geocode, type Waypoint } from './mapLoader';
 interface Props {
   waypoints: Waypoint[];
   height?: number;
+  selectedId?: string;
+  onSelect?: (id: string | null) => void;
 }
 
-export function TripMapCanvas({ waypoints, height = 280 }: Props) {
+export function TripMapCanvas({ waypoints, height = 280, onSelect }: Props) {
   const mapRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -37,15 +39,56 @@ export function TripMapCanvas({ waypoints, height = 280 }: Props) {
           zoomControl: true,
         });
 
+        const transitLayer = new window.google.maps.TransitLayer();
+        transitLayer.setMap(map);
+
         const bounds = new window.google.maps.LatLngBounds();
         const path: { lat: number; lng: number }[] = [];
+        const infoWindow = new window.google.maps.InfoWindow();
+
+        map.addListener('click', () => {
+          infoWindow.close();
+          onSelect?.(null);
+        });
+
+        // Resolve all positions first so we can detect and offset duplicates
+        const resolved: ({ lat: number; lng: number } | null)[] = [];
+        for (let i = 0; i < waypoints.length; i++) {
+          if (cancelled) break;
+          resolved.push(waypoints[i].position ?? await geocode(waypoints[i].query));
+        }
+
+        // Count how many markers land on each position
+        const posKey = (p: { lat: number; lng: number }) =>
+          `${p.lat.toFixed(6)},${p.lng.toFixed(6)}`;
+        const groupCount: Record<string, number> = {};
+        const groupIndex: Record<string, number> = {};
+        for (const pos of resolved) {
+          if (pos) groupCount[posKey(pos)] = (groupCount[posKey(pos)] ?? 0) + 1;
+        }
+
+        // Spread duplicates in a small circle (~15 m radius)
+        const OFFSET_DEG = 0.00013; // ~15 m
+        const offsetPos = (pos: { lat: number; lng: number }, key: string) => {
+          const total = groupCount[key];
+          if (total <= 1) return pos;
+          const idx = groupIndex[key] ?? 0;
+          groupIndex[key] = idx + 1;
+          const angle = (2 * Math.PI * idx) / total;
+          return {
+            lat: pos.lat + OFFSET_DEG * Math.sin(angle),
+            lng: pos.lng + OFFSET_DEG * Math.cos(angle),
+          };
+        };
 
         for (let i = 0; i < waypoints.length; i++) {
           if (cancelled) break;
-          const pos = waypoints[i].position ?? await geocode(waypoints[i].query);
-          if (!pos || cancelled) continue;
+          const rawPos = resolved[i];
+          if (!rawPos || cancelled) continue;
 
-          new window.google.maps.Marker({
+          const pos = offsetPos(rawPos, posKey(rawPos));
+
+          const gmMarker = new window.google.maps.Marker({
             map,
             position: pos,
             title: waypoints[i].label,
@@ -63,6 +106,20 @@ export function TripMapCanvas({ waypoints, height = 280 }: Props) {
               strokeColor: '#111827',
               strokeWeight: 1.5,
             },
+          });
+
+          const wp = waypoints[i];
+          gmMarker.addListener('click', () => {
+            infoWindow.setContent(
+              `<div style="font-family:Inter,sans-serif;padding:2px 4px;max-width:200px">` +
+              `<strong style="font-size:13px;color:#111827">${wp.label}</strong>` +
+              (wp.detail
+                ? `<br/><span style="font-size:12px;color:#64748b">${wp.detail}</span>`
+                : '') +
+              `</div>`,
+            );
+            infoWindow.open(map, gmMarker);
+            onSelect?.(wp.id ?? null);
           });
 
           bounds.extend(pos);

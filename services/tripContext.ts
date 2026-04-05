@@ -53,25 +53,26 @@ function buildDayRange(
 }
 
 function formatEventLine(event: TimelineEvent): string {
+  const id = `[${event.id}] `;
   switch (event.type) {
     case 'flight':
       if (event.subtype === 'departure')
-        return `- [FLIGHT] ${event.flightNo} departs ${event.departureAirport} → ${event.arrivalAirport}${event.time ? ` at ${event.time}` : ''}`;
+        return `- ${id}[FLIGHT] ${event.flightNo} departs ${event.departureAirport} → ${event.arrivalAirport}${event.time ? ` at ${event.time}` : ''}`;
       if (event.subtype === 'arrival')
-        return `- [FLIGHT] ${event.flightNo} arrives ${event.arrivalAirport}${event.time ? ` at ${event.time}` : ''}`;
+        return `- ${id}[FLIGHT] ${event.flightNo} arrives ${event.arrivalAirport}${event.time ? ` at ${event.time}` : ''}`;
       if (event.subtype === 'connection')
-        return `- [CONNECTION] ${event.connectionAirport}${event.layoverMinutes ? ` (~${event.layoverMinutes}min layover)` : ''}`;
+        return `- ${id}[CONNECTION] ${event.connectionAirport}${event.layoverMinutes ? ` (~${event.layoverMinutes}min layover)` : ''}`;
       break;
     case 'hotel':
       if (event.subtype === 'check_in')
-        return `- [HOTEL CHECK-IN] ${event.hotelName}${event.numberOfNights ? ` (${event.numberOfNights} nights)` : ''}${event.time ? ` at ${event.time}` : ''}`;
+        return `- ${id}[HOTEL CHECK-IN] ${event.hotelName}${event.numberOfNights ? ` (${event.numberOfNights} nights)` : ''}${event.time ? ` at ${event.time}` : ''}${event.locationAddress ? ` — ${event.locationAddress}` : ''}`;
       if (event.subtype === 'check_out')
-        return `- [HOTEL CHECK-OUT] ${event.hotelName}${event.time ? ` at ${event.time}` : ''}`;
+        return `- ${id}[HOTEL CHECK-OUT] ${event.hotelName}${event.time ? ` at ${event.time}` : ''}`;
       break;
     case 'otherTransportation':
-      return `- [TRANSPORT] ${event.transportType} from ${event.departureLocation} to ${event.arrivalLocation}${event.time ? ` at ${event.time}` : ''}`;
+      return `- ${id}[TRANSPORT] ${event.transportType} from ${event.departureLocation} to ${event.arrivalLocation}${event.time ? ` at ${event.time}` : ''}`;
     case 'activity':
-      return `- [ACTIVITY] ${event.description}${event.time ? ` at ${event.time}` : ''}`;
+      return `- ${id}[ACTIVITY] ${event.description}${event.time ? ` at ${event.time}` : ''}${event.locationAddress ? ` — ${event.locationAddress}` : ''}`;
   }
   return '';
 }
@@ -222,8 +223,8 @@ export function buildTripContext(input: TripContextInput): TripContextResult {
     `- Status: ${trip.status}`,
     ``,
     `## What you can do`,
-    `You have tools to manage activities (add, schedule, reschedule, remove, suggest) and to update budget targets.`,
-    `You cannot modify flights, hotels, transportation, or existing expenses — those come from imported bookings.`,
+    `You have tools to manage activities (add, update, schedule, reschedule, remove, suggest), update budget targets, and update location information (city/address) on timeline events.`,
+    `You cannot modify the booking details of flights, hotels, or transportation (dates, flight numbers, etc.) — but you can update location/address information for any event using update_timeline_event. Each itinerary event is prefixed with its id in brackets, e.g. [evt_abc123].`,
     `When adding activities, confirm the date with the user unless they have already specified one.`,
     `When suggesting activities, use the suggest_activities tool, present the results, and offer to add specific ones.`,
     `When the user asks to set or adjust a budget, use the set_budget_targets tool. You can update the overall goal and/or individual category targets. Never delete or change existing expense records.`,

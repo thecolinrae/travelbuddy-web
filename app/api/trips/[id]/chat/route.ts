@@ -1,5 +1,5 @@
 import { auth } from '@/lib/auth';
-import { getTrip, loadTimeline, loadActivities, saveActivities, updateBudgetGoals } from '@/services/db';
+import { getTrip, loadTimeline, saveTimeline, loadActivities, saveActivities, updateBudgetGoals } from '@/services/db';
 import { buildTripContext } from '@/services/tripContext';
 import {
   streamTripChat,
@@ -9,9 +9,9 @@ import {
   type AnthropicChatMessage,
   type AnthropicContentBlock,
 } from '@/services/claude';
-import { filterOpenPlaces } from '@/services/places';
+import { filterOpenPlaces, verifyPlaceAddress } from '@/services/places';
 import { nanoid } from '@/services/nanoid';
-import type { Activity, ActivityType, BudgetItemCategory } from '@/types';
+import type { Activity, ActivityType, BudgetItemCategory, TimelineEvent } from '@/types';
 import type { TripRow } from '@/services/db';
 
 // ─── Request / SSE event types ────────────────────────────────────────────────
@@ -124,6 +124,55 @@ const CHAT_TOOLS: ChatToolDefinition[] = [
     },
   },
   {
+    name: 'update_activity',
+    description:
+      'Update details of an existing activity, including its address or city. Use when the user asks to correct, add, or change location information for a saved activity.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        activityId: { type: 'string', description: 'Activity id from the Activities Bank' },
+        city: { type: 'string', description: 'Updated city name, optional' },
+        address: { type: 'string', description: 'Updated address or neighbourhood, optional' },
+      },
+      required: ['activityId'],
+    },
+  },
+  {
+    name: 'update_timeline_event',
+    description:
+      'Update the city or address of a timeline event (hotel check-in, activity, etc.). Use when the user asks to correct location information on a confirmed booking event.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        eventId: { type: 'string', description: 'Event id from the itinerary (shown as [id] in the itinerary context)' },
+        locationCity: { type: 'string', description: 'Updated city, optional' },
+        locationAddress: { type: 'string', description: 'Updated address or neighbourhood, optional' },
+      },
+      required: ['eventId'],
+    },
+  },
+  {
+    name: 'verify_address',
+    description:
+      'Verify the address of an activity or timeline event against Google Maps. ' +
+      'Checks if the place is permanently closed and corrects the stored address and coordinates. ' +
+      'Use when the user asks to verify, check, or fix an address, or when they say an address looks wrong.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        activityId: {
+          type: 'string',
+          description: 'Activity id from the Activities Bank — provide this OR eventId',
+        },
+        eventId: {
+          type: 'string',
+          description: 'Event id from the itinerary — provide this OR activityId',
+        },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'set_budget_targets',
     description:
       "Update the trip's overall budget goal and/or per-category spending targets. Use this when the user asks to set or adjust their budget. Never use this to change or delete existing expense records.",
@@ -217,8 +266,29 @@ async function executeTool(
     };
 
     const enrichedActivity = await enrichIfMissingAddress(newActivity);
-    await saveActivities(tripId, destination, [...activities, enrichedActivity]);
-    return { content: JSON.stringify({ success: true, activity: enrichedActivity }), mutated: true };
+
+    // Verify via Google Maps: check closure status and get canonical address + coords
+    const verification = await verifyPlaceAddress(enrichedActivity.name, enrichedActivity.city ?? '');
+    if (verification.permanentlyClosed) {
+      return {
+        content: JSON.stringify({
+          error: 'permanently_closed',
+          message: `"${enrichedActivity.name}" appears to be permanently closed according to Google Maps. Please suggest an alternative or ask the user for a different activity.`,
+        }),
+        mutated: false,
+      };
+    }
+    const verifiedActivity: Activity = {
+      ...enrichedActivity,
+      ...(verification.found && {
+        address: verification.address ?? enrichedActivity.address,
+        latitude: verification.lat,
+        longitude: verification.lng,
+      }),
+    };
+
+    await saveActivities(tripId, destination, [...activities, verifiedActivity]);
+    return { content: JSON.stringify({ success: true, activity: verifiedActivity }), mutated: true };
   }
 
   if (toolName === 'schedule_activity' || toolName === 'reschedule_activity') {
@@ -306,6 +376,36 @@ async function executeTool(
     return { content: JSON.stringify({ suggestions: savedSuggestions }), mutated: toAdd.length > 0 };
   }
 
+  if (toolName === 'update_activity') {
+    const existing = await loadActivities(tripId);
+    const activities: Activity[] = existing?.savedActivities ?? [];
+    const destination = existing?.destination ?? tripDestination;
+    const idx = activities.findIndex((a) => a.id === input.activityId);
+    if (idx === -1) return { content: JSON.stringify({ error: 'Activity not found' }), mutated: false };
+
+    activities[idx] = {
+      ...activities[idx],
+      ...(input.city !== undefined && { city: input.city as string }),
+      ...(input.address !== undefined && { address: input.address as string }),
+    };
+    await saveActivities(tripId, destination, activities);
+    return { content: JSON.stringify({ success: true, activity: activities[idx] }), mutated: true };
+  }
+
+  if (toolName === 'update_timeline_event') {
+    const timeline = await loadTimeline(tripId);
+    const idx = timeline.findIndex((e) => e.id === input.eventId);
+    if (idx === -1) return { content: JSON.stringify({ error: 'Event not found' }), mutated: false };
+
+    timeline[idx] = {
+      ...timeline[idx],
+      ...(input.locationCity !== undefined && { locationCity: input.locationCity as string }),
+      ...(input.locationAddress !== undefined && { locationAddress: input.locationAddress as string }),
+    } as TimelineEvent;
+    await saveTimeline(tripId, timeline);
+    return { content: JSON.stringify({ success: true, event: timeline[idx] }), mutated: true };
+  }
+
   if (toolName === 'set_budget_targets') {
     const newGoal = input.budgetGoal as number | undefined;
     const newCategoryGoals = input.categoryGoals as
@@ -326,6 +426,131 @@ async function executeTool(
         categoryGoals: updatedCategoryGoals,
       }),
       mutated: true,
+    };
+  }
+
+  if (toolName === 'verify_address') {
+    const activityId = input.activityId as string | undefined;
+    const eventId = input.eventId as string | undefined;
+
+    if (activityId) {
+      const existing = await loadActivities(tripId);
+      const activities: Activity[] = existing?.savedActivities ?? [];
+      const destination = existing?.destination ?? tripDestination;
+      const idx = activities.findIndex((a) => a.id === activityId);
+      if (idx === -1) return { content: JSON.stringify({ error: 'Activity not found' }), mutated: false };
+
+      const activity = activities[idx];
+      const verification = await verifyPlaceAddress(activity.name, activity.city ?? '');
+
+      if (!verification.found) {
+        return {
+          content: JSON.stringify({
+            verified: false,
+            message: `Could not find "${activity.name}" on Google Maps — address unchanged.`,
+          }),
+          mutated: false,
+        };
+      }
+
+      if (verification.permanentlyClosed) {
+        return {
+          content: JSON.stringify({
+            verified: true,
+            permanentlyClosed: true,
+            message: `"${activity.name}" is marked as permanently closed on Google Maps.`,
+            matchedName: verification.matchedName,
+          }),
+          mutated: false,
+        };
+      }
+
+      // Apply verified address + coordinates
+      activities[idx] = {
+        ...activity,
+        address: verification.address ?? activity.address,
+        latitude: verification.lat,
+        longitude: verification.lng,
+      };
+      await saveActivities(tripId, destination, activities);
+      return {
+        content: JSON.stringify({
+          verified: true,
+          permanentlyClosed: false,
+          updatedAddress: verification.address,
+          matchedName: verification.matchedName,
+          message: `Address verified and updated to: ${verification.address}`,
+        }),
+        mutated: true,
+      };
+    }
+
+    if (eventId) {
+      const timeline = await loadTimeline(tripId);
+      const idx = timeline.findIndex((e) => e.id === eventId);
+      if (idx === -1) return { content: JSON.stringify({ error: 'Event not found' }), mutated: false };
+
+      const event = timeline[idx];
+      // Derive the best search query from the event type
+      let searchName = '';
+      let searchCity = event.locationCity;
+      if (event.type === 'hotel') {
+        searchName = (event as import('@/types').HotelCheckInEvent).hotelName;
+      } else if (event.type === 'activity') {
+        searchName = (event as import('@/types').ActivityEvent).description;
+      } else {
+        return {
+          content: JSON.stringify({
+            error: 'Address verification is supported for hotel and activity events only.',
+          }),
+          mutated: false,
+        };
+      }
+
+      const verification = await verifyPlaceAddress(searchName, searchCity);
+
+      if (!verification.found) {
+        return {
+          content: JSON.stringify({
+            verified: false,
+            message: `Could not find "${searchName}" on Google Maps — address unchanged.`,
+          }),
+          mutated: false,
+        };
+      }
+
+      if (verification.permanentlyClosed) {
+        return {
+          content: JSON.stringify({
+            verified: true,
+            permanentlyClosed: true,
+            message: `"${searchName}" is marked as permanently closed on Google Maps.`,
+            matchedName: verification.matchedName,
+          }),
+          mutated: false,
+        };
+      }
+
+      timeline[idx] = {
+        ...timeline[idx],
+        locationAddress: verification.address ?? event.locationAddress,
+      } as TimelineEvent;
+      await saveTimeline(tripId, timeline);
+      return {
+        content: JSON.stringify({
+          verified: true,
+          permanentlyClosed: false,
+          updatedAddress: verification.address,
+          matchedName: verification.matchedName,
+          message: `Address verified and updated to: ${verification.address}`,
+        }),
+        mutated: true,
+      };
+    }
+
+    return {
+      content: JSON.stringify({ error: 'Provide either activityId or eventId.' }),
+      mutated: false,
     };
   }
 
@@ -409,7 +634,7 @@ export async function POST(
             // Read-only users cannot mutate activities
             if (
               !isOwner &&
-              ['add_activity', 'schedule_activity', 'reschedule_activity', 'remove_activity', 'suggest_activities', 'set_budget_targets'].includes(
+              ['add_activity', 'schedule_activity', 'reschedule_activity', 'remove_activity', 'suggest_activities', 'set_budget_targets', 'verify_address'].includes(
                 tc.name,
               )
             ) {

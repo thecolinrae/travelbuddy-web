@@ -125,7 +125,11 @@ export async function fetchGmailLabels(accessToken: string): Promise<GmailLabel[
 export interface SearchEmailsOpts {
   labelId?: string;
   customQuery?: string;
+  /** When true, paginate through all results (up to MAX_FETCH_ALL). Used for label imports. */
+  fetchAll?: boolean;
 }
+
+const MAX_FETCH_ALL = 500;
 
 export async function searchTravelEmails(
   accessToken: string,
@@ -144,14 +148,31 @@ export async function searchTravelEmails(
     query = `(${TRAVEL_QUERY} after:${after90}) OR (label:Travel after:${after365})`;
   }
 
-  let listUrl = `/users/me/messages?q=${encodeURIComponent(query)}&maxResults=${maxResults}`;
-  if (opts?.labelId) listUrl += `&labelIds=${encodeURIComponent(opts.labelId)}`;
+  // Collect all message IDs, paginating if fetchAll is set.
+  const pageSize = opts?.fetchAll ? 100 : maxResults;
+  const allIds: string[] = [];
+  let pageToken: string | undefined;
 
-  const listResult = await gmailRequest<{ messages?: Array<{ id: string }> }>(listUrl, accessToken);
-  if (!listResult.messages?.length) return [];
+  do {
+    let listUrl = `/users/me/messages?q=${encodeURIComponent(query)}&maxResults=${pageSize}`;
+    if (opts?.labelId) listUrl += `&labelIds=${encodeURIComponent(opts.labelId)}`;
+    if (pageToken) listUrl += `&pageToken=${encodeURIComponent(pageToken)}`;
+
+    const listResult = await gmailRequest<{
+      messages?: Array<{ id: string }>;
+      nextPageToken?: string;
+    }>(listUrl, accessToken);
+
+    for (const { id } of listResult.messages ?? []) {
+      allIds.push(id);
+    }
+    pageToken = opts?.fetchAll ? listResult.nextPageToken : undefined;
+  } while (pageToken && allIds.length < MAX_FETCH_ALL);
+
+  if (!allIds.length) return [];
 
   const messages: GmailMessage[] = [];
-  for (const { id } of listResult.messages) {
+  for (const id of allIds) {
     try {
       const full = await gmailRequest<GmailFullMessage>(
         `/users/me/messages/${id}?format=full`,

@@ -44,4 +44,8 @@ export interface Waypoint {
   query: string;
   /** Pre-resolved coordinates — if present, geocoding is skipped entirely */
   position?: { lat: number; lng: number };
+  /** Item ID used to sync pin clicks with the day list */
+  id?: string;
+  /** Optional subtitle shown in the pin popup (e.g. street address) */
+  detail?: string;
 }

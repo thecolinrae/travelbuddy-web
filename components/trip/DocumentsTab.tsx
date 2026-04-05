@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Download, Loader2, Trash2, FileText, File, Image, Mail } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { GmailSyncSection } from '@/components/trip/GmailSyncSection';
+import type { LabelSync } from '@/services/db';
 
 export interface ArtifactInfo {
   id: string;
@@ -31,9 +33,10 @@ interface Props {
   artifacts: ArtifactInfo[];
   tripId: string;
   isOwner: boolean;
+  labelSyncs?: LabelSync[];
 }
 
-export function DocumentsTab({ artifacts, tripId, isOwner }: Props) {
+export function DocumentsTab({ artifacts, tripId, isOwner, labelSyncs }: Props) {
   const router = useRouter();
   const [downloading, setDownloading] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -147,10 +150,16 @@ export function DocumentsTab({ artifacts, tripId, isOwner }: Props) {
         ))}
       </ul>
 
+      {isOwner && labelSyncs && labelSyncs.length > 0 && (
+        <div className="pt-2">
+          <GmailSyncSection tripId={tripId} labelSyncs={labelSyncs} />
+        </div>
+      )}
+
       <div className="pt-2">
         <a
           href={`/import?tripId=${tripId}`}
-          className="text-sm text-primary hover:underline"
+          className="text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           + Add more documents
         </a>
