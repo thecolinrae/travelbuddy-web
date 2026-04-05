@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Link2, Loader2, X, CheckCircle2, DollarSign, Clock, MapPin, Hash } from 'lucide-react';
+import { Link2, Loader2, X, CheckCircle2, DollarSign, Clock, MapPin, Hash, AlertTriangle } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -145,6 +145,13 @@ export function MergeActivityModal({
             </div>
           </div>
         </div>
+
+        {activity.scheduledDate && event.date && activity.scheduledDate !== event.date && (
+          <p className="text-sm text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            These are on different dates ({activity.scheduledDate} vs {event.date}). You can still link them.
+          </p>
+        )}
 
         {error && <p className="text-sm text-destructive">{error}</p>}
 

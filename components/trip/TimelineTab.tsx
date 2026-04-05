@@ -15,6 +15,9 @@ import { Button } from '@/components/ui/button';
 import { CategoryIcon } from '@/components/trip/activityIcons';
 import { ActivityEditModal } from './activities/ActivityEditModal';
 import { EventFormModal, type TransportPrefill } from './EventFormModal';
+import { MergeDndContext } from './dnd/MergeDndContext';
+import { DraggableItem } from './dnd/DraggableItem';
+import { DroppableTarget } from './dnd/DroppableTarget';
 import type { TimelineEvent, ExpenseEvent, TransportType, TransportDepartureEvent, TransportArrivalEvent, Activity, ActivityEvent } from '@/types';
 import { nanoid } from '@/services/nanoid';
 
@@ -258,6 +261,12 @@ export function TimelineTab({ tripId, timeline, activities, isOwner }: Props) {
   const allDates = new Set([...byDate.keys(), ...activitiesByDate.keys()]);
   const days = [...allDates].sort();
 
+  // Unlinked items eligible for DnD merging
+  const unlinkedActivityEvents = timeline.filter(
+    (e): e is ActivityEvent => e.type === 'activity' && !e.linkedActivityId,
+  );
+  const unlinkedActivities = scheduledActivities.filter((a) => !a.linkedEventId);
+
   return (
     <div className="space-y-4">
       {isOwner && (
@@ -268,6 +277,12 @@ export function TimelineTab({ tripId, timeline, activities, isOwner }: Props) {
         </div>
       )}
 
+      <MergeDndContext
+        tripId={tripId}
+        activities={unlinkedActivities}
+        activityEvents={unlinkedActivityEvents}
+        isOwner={isOwner}
+      >
       <div className="space-y-8">
         {days.map((date) => {
           const events = byDate.get(date) ?? [];
@@ -304,149 +319,169 @@ export function TimelineTab({ tripId, timeline, activities, isOwner }: Props) {
                 {merged.map((item) => {
                   if (item.kind === 'activity') {
                     const a = item.data;
+                    const canMerge = isOwner && !a.linkedEventId;
                     return (
-                      <li key={`activity-${a.id}`} className="flex items-start gap-3 rounded-lg border bg-card px-4 py-3">
-                        <span className="mt-0.5 shrink-0"><CategoryIcon type={a.type} /></span>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <p className="text-sm font-medium">{a.name}</p>
-                            <Badge variant="outline" className="text-xs font-normal bg-primary/10 text-primary-foreground border-primary/30">
-                              Planned
-                            </Badge>
-                          </div>
-                          <div className="flex flex-wrap gap-x-3 mt-0.5">
-                            {a.scheduledTime && (
-                              <span className="text-xs text-muted-foreground">{fmt12(a.scheduledTime)}</span>
-                            )}
-                            {a.city && (
-                              <span className="text-xs text-muted-foreground">{a.city}</span>
-                            )}
-                          </div>
-                        </div>
-                        {isOwner && (
-                          <div className="flex items-center gap-1 shrink-0">
-                            {confirmDeleteActivity === a.id ? (
-                              <>
-                                <Button
-                                  variant="destructive"
-                                  size="sm"
-                                  onClick={() => handleDeleteActivity(a.id)}
-                                  disabled={deletingActivity === a.id}
-                                >
-                                  {deletingActivity === a.id ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Delete'}
-                                </Button>
-                                <Button variant="ghost" size="sm" onClick={() => setConfirmDeleteActivity(null)}>
-                                  Cancel
-                                </Button>
-                              </>
-                            ) : (
-                              <>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => setEditingActivity(a)}
-                                  className="text-muted-foreground hover:text-foreground"
-                                >
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => setConfirmDeleteActivity(a.id)}
-                                  className="text-muted-foreground hover:text-destructive"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </>
-                            )}
-                          </div>
-                        )}
+                      <li key={`activity-${a.id}`}>
+                        <DraggableItem id={`activity:${a.id}`} disabled={!canMerge}>
+                          {(handle) => (
+                            <DroppableTarget id={`activity:${a.id}`}>
+                              <div className="flex items-start gap-3 rounded-lg border bg-card px-4 py-3">
+                                <span className="mt-0.5 shrink-0"><CategoryIcon type={a.type} /></span>
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <p className="text-sm font-medium">{a.name}</p>
+                                    <Badge variant="outline" className="text-xs font-normal bg-primary/10 text-primary-foreground border-primary/30">
+                                      Planned
+                                    </Badge>
+                                  </div>
+                                  <div className="flex flex-wrap gap-x-3 mt-0.5">
+                                    {a.scheduledTime && (
+                                      <span className="text-xs text-muted-foreground">{fmt12(a.scheduledTime)}</span>
+                                    )}
+                                    {a.city && (
+                                      <span className="text-xs text-muted-foreground">{a.city}</span>
+                                    )}
+                                  </div>
+                                </div>
+                                {isOwner && (
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    {handle}
+                                    {confirmDeleteActivity === a.id ? (
+                                      <>
+                                        <Button
+                                          variant="destructive"
+                                          size="sm"
+                                          onClick={() => handleDeleteActivity(a.id)}
+                                          disabled={deletingActivity === a.id}
+                                        >
+                                          {deletingActivity === a.id ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Delete'}
+                                        </Button>
+                                        <Button variant="ghost" size="sm" onClick={() => setConfirmDeleteActivity(null)}>
+                                          Cancel
+                                        </Button>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => setEditingActivity(a)}
+                                          className="text-muted-foreground hover:text-foreground"
+                                        >
+                                          <Pencil className="h-4 w-4" />
+                                        </Button>
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => setConfirmDeleteActivity(a.id)}
+                                          className="text-muted-foreground hover:text-destructive"
+                                        >
+                                          <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                      </>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </DroppableTarget>
+                          )}
+                        </DraggableItem>
                       </li>
                     );
                   }
 
                   const e = item.data;
+                  const canMergeEvent = isOwner && e.type === 'activity' && !(e as ActivityEvent).linkedActivityId;
                   return (
-                    <li key={e.id} className="flex items-start gap-3 rounded-lg border bg-card px-4 py-3">
-                      <span className="mt-0.5 shrink-0"><EventIcon e={e} /></span>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium">{eventHeadline(e)}</p>
-                        <div className="flex flex-wrap gap-x-3 mt-0.5">
-                          {e.time && (
-                            <span className="text-xs text-muted-foreground">
-                              {fmt12(e.time)}
-                              {tzAbbr(e.timezone, e.date) && ` · ${tzAbbr(e.timezone, e.date)}`}
-                              {e.utcISO && ` · ${fmtUtc(e.utcISO)}`}
-                            </span>
-                          )}
-                          {e.locationCity && (
-                            <span className="text-xs text-muted-foreground">{e.locationCity}</span>
-                          )}
-                        </div>
-                        {linkedExpenses.get(e.id)?.map((exp) => (
-                          <p key={exp.id} className="text-xs text-muted-foreground mt-1">
-                            {new Intl.NumberFormat('en-US', {
-                              style: 'currency',
-                              currency: exp.cost.preferredCurrency,
-                            }).format(exp.cost.amountPreferredCurrency)}
-                            {exp.description && ` · ${exp.description}`}
-                          </p>
-                        ))}
-                        {isOwner && (() => {
-                          const missing = getMissingCounterpart(e);
-                          if (!missing) return null;
-                          return (
-                            <button
-                              onClick={() => handleAddCounterpart(e as TransportDepartureEvent | TransportArrivalEvent)}
-                              className="mt-1.5 inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 hover:underline"
-                            >
-                              <Plus className="h-3 w-3" />
-                              Add missing {missing}
-                            </button>
-                          );
-                        })()}
-                      </div>
+                    <li key={e.id}>
+                      <DraggableItem id={`event:${e.id}`} disabled={!canMergeEvent}>
+                        {(handle) => (
+                          <DroppableTarget id={`event:${e.id}`}>
+                            <div className="flex items-start gap-3 rounded-lg border bg-card px-4 py-3">
+                              <span className="mt-0.5 shrink-0"><EventIcon e={e} /></span>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm font-medium">{eventHeadline(e)}</p>
+                                <div className="flex flex-wrap gap-x-3 mt-0.5">
+                                  {e.time && (
+                                    <span className="text-xs text-muted-foreground">
+                                      {fmt12(e.time)}
+                                      {tzAbbr(e.timezone, e.date) && ` · ${tzAbbr(e.timezone, e.date)}`}
+                                      {e.utcISO && ` · ${fmtUtc(e.utcISO)}`}
+                                    </span>
+                                  )}
+                                  {e.locationCity && (
+                                    <span className="text-xs text-muted-foreground">{e.locationCity}</span>
+                                  )}
+                                </div>
+                                {linkedExpenses.get(e.id)?.map((exp) => (
+                                  <p key={exp.id} className="text-xs text-muted-foreground mt-1">
+                                    {new Intl.NumberFormat('en-US', {
+                                      style: 'currency',
+                                      currency: exp.cost.preferredCurrency,
+                                    }).format(exp.cost.amountPreferredCurrency)}
+                                    {exp.description && ` · ${exp.description}`}
+                                  </p>
+                                ))}
+                                {isOwner && (() => {
+                                  const missing = getMissingCounterpart(e);
+                                  if (!missing) return null;
+                                  return (
+                                    <button
+                                      onClick={() => handleAddCounterpart(e as TransportDepartureEvent | TransportArrivalEvent)}
+                                      className="mt-1.5 inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 hover:underline"
+                                    >
+                                      <Plus className="h-3 w-3" />
+                                      Add missing {missing}
+                                    </button>
+                                  );
+                                })()}
+                              </div>
 
-                      {isOwner && (
-                        <div className="flex items-center gap-1 shrink-0">
-                          {confirmDelete === e.id ? (
-                            <>
-                              <Button
-                                variant="destructive"
-                                size="sm"
-                                onClick={() => handleDelete(e.id)}
-                                disabled={deleting === e.id}
-                              >
-                                {deleting === e.id ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Delete'}
-                              </Button>
-                              <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(null)}>
-                                Cancel
-                              </Button>
-                            </>
-                          ) : (
-                            <>
-                              {isEditable(e) && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => setEditing(e)}
-                                  className="text-muted-foreground hover:text-foreground"
-                                >
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
+                              {isOwner && (
+                                <div className="flex items-center gap-1 shrink-0">
+                                  {handle}
+                                  {confirmDelete === e.id ? (
+                                    <>
+                                      <Button
+                                        variant="destructive"
+                                        size="sm"
+                                        onClick={() => handleDelete(e.id)}
+                                        disabled={deleting === e.id}
+                                      >
+                                        {deleting === e.id ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Delete'}
+                                      </Button>
+                                      <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(null)}>
+                                        Cancel
+                                      </Button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      {isEditable(e) && (
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => setEditing(e)}
+                                          className="text-muted-foreground hover:text-foreground"
+                                        >
+                                          <Pencil className="h-4 w-4" />
+                                        </Button>
+                                      )}
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => setConfirmDelete(e.id)}
+                                        className="text-muted-foreground hover:text-destructive"
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    </>
+                                  )}
+                                </div>
                               )}
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setConfirmDelete(e.id)}
-                                className="text-muted-foreground hover:text-destructive"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </>
-                          )}
-                        </div>
-                      )}
+                            </div>
+                          </DroppableTarget>
+                        )}
+                      </DraggableItem>
                     </li>
                   );
                 })}
@@ -455,6 +490,7 @@ export function TimelineTab({ tripId, timeline, activities, isOwner }: Props) {
           );
         })}
       </div>
+      </MergeDndContext>
 
       {addOpen && (
         <EventFormModal

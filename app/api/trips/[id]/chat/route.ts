@@ -173,6 +173,27 @@ const CHAT_TOOLS: ChatToolDefinition[] = [
     },
   },
   {
+    name: 'merge_events',
+    description:
+      'Link a planned activity to a confirmed activity booking (ActivityEvent). Use when the user asks to merge, link, or combine a planned activity with a matching confirmed booking. ' +
+      'The activityId comes from the Activities Bank (shown with [id] prefix). ' +
+      'The eventId comes from an [ACTIVITY] line in the trip itinerary.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        activityId: {
+          type: 'string',
+          description: 'The id of the planned Activity from the Activities Bank',
+        },
+        eventId: {
+          type: 'string',
+          description: 'The id of the ActivityEvent from the itinerary [ACTIVITY] line',
+        },
+      },
+      required: ['activityId', 'eventId'],
+    },
+  },
+  {
     name: 'set_budget_targets',
     description:
       "Update the trip's overall budget goal and/or per-category spending targets. Use this when the user asks to set or adjust their budget. Never use this to change or delete existing expense records.",
@@ -493,7 +514,7 @@ async function executeTool(
       const event = timeline[idx];
       // Derive the best search query from the event type
       let searchName = '';
-      let searchCity = event.locationCity;
+      const searchCity = event.locationCity;
       if (event.type === 'hotel') {
         searchName = (event as import('@/types').HotelCheckInEvent).hotelName;
       } else if (event.type === 'activity') {
@@ -551,6 +572,41 @@ async function executeTool(
     return {
       content: JSON.stringify({ error: 'Provide either activityId or eventId.' }),
       mutated: false,
+    };
+  }
+
+  if (toolName === 'merge_events') {
+    const activityId = input.activityId as string;
+    const eventId = input.eventId as string;
+    const [activitiesData, timeline] = await Promise.all([loadActivities(tripId), loadTimeline(tripId)]);
+    const activities: Activity[] = activitiesData?.savedActivities ?? [];
+    const activityIdx = activities.findIndex((a) => a.id === activityId);
+    if (activityIdx === -1) return { content: JSON.stringify({ error: 'Activity not found' }), mutated: false };
+    const eventIdx = timeline.findIndex((e) => e.id === eventId);
+    if (eventIdx === -1) return { content: JSON.stringify({ error: 'Event not found' }), mutated: false };
+    const event = timeline[eventIdx];
+    if (event.type !== 'activity') {
+      return { content: JSON.stringify({ error: 'Event is not an activity booking — only activity-type events can be linked' }), mutated: false };
+    }
+    const activity = activities[activityIdx];
+    if (activity.linkedEventId) {
+      return { content: JSON.stringify({ error: `"${activity.name}" is already linked to another event` }), mutated: false };
+    }
+    if ((event as TimelineEvent & { linkedActivityId?: string }).linkedActivityId) {
+      return { content: JSON.stringify({ error: `That event is already linked to another activity` }), mutated: false };
+    }
+    activities[activityIdx] = { ...activity, linkedEventId: eventId };
+    timeline[eventIdx] = { ...event, linkedActivityId: activityId };
+    await Promise.all([
+      saveActivities(tripId, activitiesData?.destination ?? trip.destination, activities),
+      saveTimeline(tripId, timeline),
+    ]);
+    return {
+      content: JSON.stringify({
+        success: true,
+        message: `Linked "${activity.name}" with "${(event as TimelineEvent & { description?: string }).description ?? event.locationCity}".`,
+      }),
+      mutated: true,
     };
   }
 
@@ -634,7 +690,7 @@ export async function POST(
             // Read-only users cannot mutate activities
             if (
               !isOwner &&
-              ['add_activity', 'schedule_activity', 'reschedule_activity', 'remove_activity', 'suggest_activities', 'set_budget_targets', 'verify_address'].includes(
+              ['add_activity', 'schedule_activity', 'reschedule_activity', 'remove_activity', 'suggest_activities', 'set_budget_targets', 'verify_address', 'merge_events'].includes(
                 tc.name,
               )
             ) {
