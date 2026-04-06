@@ -305,6 +305,123 @@ Every component must include `dark:` variants for any hardcoded color (not for C
 
 ---
 
+## Wordmark & Brand Identity
+
+TravelBuddy has two canonical wordmark variants. Use the correct one for each context. Never improvise a third.
+
+### Variant A — Compact Badge
+
+Used in: PDF binder headers, mobile nav overlay, tight toolbar spaces, favicons, email headers.
+
+```
+╔══════════════════════════╗
+║  ◎  TravelBuddy          ║  ← yellow pill, dark text + icon
+╚══════════════════════════╝
+```
+
+**Spec (web):**
+```tsx
+<div className="inline-flex items-center gap-1.5 px-2 py-1 bg-primary rounded-md">
+  <Compass className="h-3.5 w-3.5 text-primary-foreground flex-shrink-0" />
+  <span className="font-display font-semibold text-sm text-primary-foreground leading-none">
+    TravelBuddy
+  </span>
+</div>
+```
+
+| Property | Value |
+|---|---|
+| Background | `bg-primary` (`#FACC15`) |
+| Text + icon color | `text-primary-foreground` (`#111827`) |
+| Font | Fraunces (`font-display`), semibold |
+| Font size | `text-sm` (14px) |
+| Icon | `Compass` from Lucide, `h-3.5 w-3.5` |
+| Shape | `rounded-md` (6px radius) |
+| Padding | `px-2 py-1` |
+
+**Rules:**
+- Always yellow background, never white or dark
+- Icon and text color must be `text-primary-foreground` (near-black), never white
+- Do not change the icon — `Compass` is the canonical brand icon
+
+---
+
+### Variant C — Full Logomark
+
+Used in: Main nav header, onboarding screens, landing/marketing pages, about page, dialogs where full branding is appropriate.
+
+```
+┌──┐
+│ ◎│  TravelBuddy
+└──┘
+```
+
+The icon lives in a yellow rounded square; the wordmark text is dark and unstyled (no background on the text portion).
+
+**Spec (web):**
+```tsx
+<div className="flex items-center gap-2.5">
+  {/* Icon mark — yellow square with compass */}
+  <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center flex-shrink-0">
+    <Compass className="h-5 w-5 text-primary-foreground" />
+  </div>
+  {/* Wordmark */}
+  <span className="font-display font-semibold text-xl text-text-base leading-none">
+    TravelBuddy
+  </span>
+</div>
+```
+
+| Property | Value |
+|---|---|
+| Icon container | `w-8 h-8 rounded-lg bg-primary` (32px × 32px, yellow, 8px radius) |
+| Icon | `Compass`, `h-5 w-5 text-primary-foreground` |
+| Text | Fraunces (`font-display`), semibold, `text-xl` (20px) |
+| Text color | `text-text-base` (adapts to dark mode) |
+| Gap | `gap-2.5` (10px) |
+
+**Responsive variants:**
+
+| Breakpoint | Behaviour |
+|---|---|
+| `md` and above | Full logomark (icon + text) |
+| Below `md` | Icon mark only (`w-8 h-8` square, no text) |
+
+```tsx
+{/* Responsive version */}
+<div className="flex items-center gap-2.5">
+  <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center flex-shrink-0">
+    <Compass className="h-5 w-5 text-primary-foreground" />
+  </div>
+  <span className="hidden md:block font-display font-semibold text-xl text-text-base leading-none">
+    TravelBuddy
+  </span>
+</div>
+```
+
+---
+
+### PDF binder badge
+
+In PDF context (no Lucide icons available), the badge is rendered as:
+- Yellow background rectangle (`#FACC15`)
+- "TravelBuddy" in Times-Roman bold (Fraunces substitute), `#111827`
+- 8pt left/right padding, 4pt top/bottom
+
+This is the only context where the `Compass` icon is omitted from the badge.
+
+---
+
+### What never to do with the wordmark
+
+- Never use the text wordmark without the icon mark (in web contexts)
+- Never place the wordmark on a colored background other than white, `bg-card`, or `bg-background`
+- Never change the icon from `Compass`
+- Never use a different font for "TravelBuddy" — it is always Fraunces semibold
+- Never render the wordmark text in yellow
+
+---
+
 ## Checklist before submitting any UI component
 
 - [ ] No emoji used anywhere — all replaced with Lucide icons

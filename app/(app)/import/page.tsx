@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { ClipboardPaste, Mail, X, FileText, File } from 'lucide-react';
+import { ClipboardPaste, Mail, X, FileText, File, Package, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -38,6 +38,7 @@ export default function ImportPage() {
   const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState<ProgressState | null>(null);
   const [emailLabel, setEmailLabel] = useState<{ id: string; name: string } | null>(null);
+  const [bundleImporting, setBundleImporting] = useState(false);
 
   useEffect(() => {
     fetch('/api/trips')
@@ -152,6 +153,22 @@ export default function ImportPage() {
       toast.error(err instanceof Error ? err.message : 'Import failed.');
       setImporting(false);
       setProgress(null);
+    }
+  }
+
+  async function handleBundleImport(file: File) {
+    setBundleImporting(true);
+    try {
+      const formData = new FormData();
+      formData.set('file', file);
+      const res = await fetch('/api/trips/import/bundle', { method: 'POST', body: formData });
+      const data = (await res.json()) as { tripId?: string; error?: string };
+      if (!res.ok || !data.tripId) throw new Error(data.error ?? 'Import failed');
+      toast.success('Trip restored successfully');
+      router.push(`/trip/${data.tripId}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Bundle import failed.');
+      setBundleImporting(false);
     }
   }
 
@@ -275,6 +292,57 @@ export default function ImportPage() {
         >
           Import {items.length > 0 ? `${items.length} document${items.length > 1 ? 's' : ''}` : 'documents'}
         </Button>
+
+        {/* Divider */}
+        <div className="flex items-center gap-3">
+          <div className="flex-1 h-px bg-border" />
+          <span className="text-xs text-muted-foreground">or restore a backup</span>
+          <div className="flex-1 h-px bg-border" />
+        </div>
+
+        {/* Bundle restore */}
+        <section className="rounded-xl border bg-card p-5 space-y-3">
+          <div className="flex items-start gap-3">
+            <div className="rounded-lg bg-surface p-2 shrink-0">
+              <Package className="h-4 w-4 text-text-muted" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-text-base">Import TravelBuddy Bundle</p>
+              <p className="type-caption leading-relaxed mt-0.5">
+                Restore a trip from a <code className="font-mono text-xs">.zip</code> file exported by TravelBuddy. All data and uploaded documents are restored as a new trip.
+              </p>
+            </div>
+          </div>
+          <label className={[
+            'flex items-center justify-center gap-2 w-full rounded-lg border border-dashed px-4 py-3 text-sm cursor-pointer transition-colors',
+            bundleImporting
+              ? 'opacity-50 pointer-events-none border-border text-muted-foreground'
+              : 'border-border text-muted-foreground hover:border-primary/50 hover:text-text-base hover:bg-surface',
+          ].join(' ')}>
+            {bundleImporting ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Restoring trip…
+              </>
+            ) : (
+              <>
+                <Package className="h-4 w-4" />
+                Choose .zip file
+              </>
+            )}
+            <input
+              type="file"
+              accept=".zip"
+              className="sr-only"
+              disabled={bundleImporting}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleBundleImport(file);
+                e.target.value = '';
+              }}
+            />
+          </label>
+        </section>
       </main>
 
       <TextPasteModal

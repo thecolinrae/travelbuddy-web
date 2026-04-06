@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
-import { ArrowLeft, Plus, Share2, Pencil, Trash2, MessageCircle, Route } from 'lucide-react';
+import { ArrowLeft, Plus, Share2, Pencil, Trash2, MessageCircle, Route, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import { ShareModal } from '@/components/trip/ShareModal';
 import { TripEditModal } from '@/components/trip/TripEditModal';
+import { ExportModal } from '@/components/trip/ExportModal';
 import { DayTab } from '@/components/trip/DayTab';
 import { buildDayRange } from '@/components/trip/day/utils';
 import { TimelineTab } from '@/components/trip/TimelineTab';
@@ -110,6 +111,7 @@ export function TripDetailClient({ trip, timeline, legs, activities: initialActi
   });
   const [shareOpen, setShareOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
@@ -216,6 +218,15 @@ export function TripDetailClient({ trip, timeline, legs, activities: initialActi
               <Share2 className="h-4 w-4" />
             </Button>
           )}
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={() => setExportOpen(true)}
+            aria-label="Export trip"
+            className="h-8 w-8 text-white/90 hover:text-white hover:bg-white/15 border border-white/20"
+          >
+            <Download className="h-4 w-4" />
+          </Button>
           {hasTransport && (
             <Button
               asChild
@@ -406,6 +417,12 @@ export function TripDetailClient({ trip, timeline, legs, activities: initialActi
       />
 
       {/* Modals */}
+      <ExportModal
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        tripId={trip.id}
+        tripName={trip.name}
+      />
       {isOwner && (
         <ShareModal tripId={trip.id} open={shareOpen} onClose={() => setShareOpen(false)} />
       )}

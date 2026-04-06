@@ -97,7 +97,7 @@ function inferCityFromHotelName(name: string): string {
 }
 
 /** Build a Cost object, computing preferred amount if rates are provided. */
-function makeCost(
+export function makeCost(
   localAmount: number,
   localCurrency: string,
   preferredCurrency: string,
@@ -538,7 +538,7 @@ function mergeEvents(existing: TimelineEvent, incoming: TimelineEvent): Timeline
 function extractEvents(
   artifact: ParsedArtifact,
   sourceFileName?: string,
-  preferredCurrency = 'USD',
+  preferredCurrency = 'CAD',
   rates: Record<string, number> = {},
 ): TimelineEvent[] {
   const events: TimelineEvent[] = [];
@@ -965,15 +965,54 @@ function extractEvents(
       break;
     }
 
-    case 'expense':
+    case 'expense': {
+      // Explicitly typed expense/receipt — always emit an ExpenseEvent when date is present,
+      // even if amount is missing or zero, so the user can see and edit it.
+      const date = artifact.startDate ?? artifact.checkIn;
+      if (!date) break;
+      const defaultCity = stripAirportCode(artifact.destination ?? '') || artifact.destination || '';
+      const defaultTz = resolveTimezone(defaultCity) ?? undefined;
+      const cost = makeCost(
+        artifact.amount ?? 0,
+        artifact.currency ?? preferredCurrency,
+        preferredCurrency,
+        rates,
+      );
+      // Infer a more specific category from the activity category when available
+      const expenseCategory = ((): string => {
+        switch (artifact.activityCategory) {
+          case 'food': case 'nightlife': return 'food';
+          case 'sightseeing': case 'culture': case 'nature':
+          case 'adventure': case 'wellness': return 'activities';
+          default: return 'other';
+        }
+      })();
+      events.push({
+        id: nanoid(),
+        type: 'expense',
+        date,
+        timezone: defaultTz,
+        utcISO: utcForEvent(date, artifact.startTime, defaultTz),
+        locationCity: defaultCity,
+        locationAddress: artifact.locationAddress,
+        description: artifact.vendor ?? artifact.destination ?? 'Expense',
+        vendor: artifact.vendor,
+        category: expenseCategory,
+        cost,
+        notes: artifact.notes,
+        artifactSources: src ? [src] : undefined,
+      } as ExpenseEvent);
+      break;
+    }
+
     default: {
-      // expense / receipt / other — ExpenseEvent when cost present, ActivityEvent otherwise
+      // Unknown type ('other') — only emit if there's an amount, otherwise treat as activity
       const date = artifact.startDate ?? artifact.checkIn;
       const defaultCity = stripAirportCode(artifact.destination ?? '') || artifact.destination || '';
       const defaultTz = resolveTimezone(defaultCity) ?? undefined;
       if (date && artifact.amount && artifact.amount > 0) {
         const cost = makeCost(artifact.amount, artifact.currency ?? preferredCurrency, preferredCurrency, rates);
-        const expense: ExpenseEvent = {
+        events.push({
           id: nanoid(),
           type: 'expense',
           date,
@@ -987,11 +1026,9 @@ function extractEvents(
           cost,
           notes: artifact.notes,
           artifactSources: src ? [src] : undefined,
-        };
-        events.push(expense);
+        } as ExpenseEvent);
       } else if (date) {
-        // Non-cost other artifact — emit as activity
-        const activity: ActivityEvent = {
+        events.push({
           id: nanoid(),
           type: 'activity',
           date,
@@ -1004,8 +1041,7 @@ function extractEvents(
           notes: artifact.notes,
           bookingRef: artifact.confirmationNumber,
           artifactSources: src ? [src] : undefined,
-        };
-        events.push(activity);
+        } as ActivityEvent);
       }
       break;
     }
@@ -1023,7 +1059,7 @@ function extractEvents(
 export function buildTimeline(
   artifacts: ParsedArtifact[],
   sourceFileNames?: string[],
-  preferredCurrency = 'USD',
+  preferredCurrency = 'CAD',
   rates: Record<string, number> = {},
 ): TimelineEvent[] {
   return deduplicateTimeline(
@@ -1334,7 +1370,7 @@ export function migrateTimeline(raw: unknown[]): TimelineEvent[] {
             locationCity: stripAirportCode(depAirport) || city,
             description: rawEvent.headline,
             category: 'flights',
-            cost: legacyCost(rawEvent.amount, rawEvent.currency ?? 'USD'),
+            cost: legacyCost(rawEvent.amount, rawEvent.currency ?? 'CAD'),
             artifactSources: src ? [src] : undefined,
           });
         }
@@ -1385,7 +1421,7 @@ export function migrateTimeline(raw: unknown[]): TimelineEvent[] {
             locationCity: city,
             description: hotelName,
             category: 'hotels',
-            cost: legacyCost(rawEvent.amount, rawEvent.currency ?? 'USD'),
+            cost: legacyCost(rawEvent.amount, rawEvent.currency ?? 'CAD'),
             artifactSources: src ? [src] : undefined,
           });
         }
@@ -1430,7 +1466,7 @@ export function migrateTimeline(raw: unknown[]): TimelineEvent[] {
             locationCity: city,
             description: rawEvent.headline,
             category: 'car_rental',
-            cost: legacyCost(rawEvent.amount, rawEvent.currency ?? 'USD'),
+            cost: legacyCost(rawEvent.amount, rawEvent.currency ?? 'CAD'),
             artifactSources: src ? [src] : undefined,
           } as ExpenseEvent);
         }
@@ -1463,7 +1499,7 @@ export function migrateTimeline(raw: unknown[]): TimelineEvent[] {
           description: rawEvent.headline,
           category: 'sightseeing',
           cost: rawEvent.amount && rawEvent.amount > 0
-            ? legacyCost(rawEvent.amount, rawEvent.currency ?? 'USD')
+            ? legacyCost(rawEvent.amount, rawEvent.currency ?? 'CAD')
             : undefined,
           notes: rawEvent.details,
           artifactSources: src ? [src] : undefined,
@@ -1477,7 +1513,7 @@ export function migrateTimeline(raw: unknown[]): TimelineEvent[] {
             locationCity: city,
             description: rawEvent.headline,
             category: 'activities',
-            cost: legacyCost(rawEvent.amount, rawEvent.currency ?? 'USD'),
+            cost: legacyCost(rawEvent.amount, rawEvent.currency ?? 'CAD'),
             artifactSources: src ? [src] : undefined,
           } as ExpenseEvent);
         }
@@ -1495,7 +1531,7 @@ export function migrateTimeline(raw: unknown[]): TimelineEvent[] {
             locationCity: city,
             description: rawEvent.headline,
             category: 'other',
-            cost: legacyCost(rawEvent.amount, rawEvent.currency ?? 'USD'),
+            cost: legacyCost(rawEvent.amount, rawEvent.currency ?? 'CAD'),
             notes: rawEvent.details,
             artifactSources: src ? [src] : undefined,
           } as ExpenseEvent);

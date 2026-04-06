@@ -75,7 +75,8 @@ async function callClaude(
 
 // ─── Document Parsing ─────────────────────────────────────────────────────────
 
-const PARSE_SYSTEM = `You are a travel document parser. Extract all booking information from the given travel document and return it as valid JSON.
+function buildParseSystem(preferredCurrency: string): string {
+  return `You are a travel document parser. Extract all booking information from the given travel document and return it as valid JSON.
 
 Return ONLY a JSON object matching this schema:
 {
@@ -128,7 +129,7 @@ Return ONLY a JSON object matching this schema:
       "numberOfNights": number,
       "breakfastIncluded": true,
       "amount": number,
-      "currency": "USD",
+      "currency": "${preferredCurrency}",
       "notes": "string",
       "activityCategory": "sightseeing|food|adventure|culture|shopping|nightlife|nature|wellness (activity artifacts only)",
 
@@ -172,13 +173,14 @@ Rules:
 - ACTIVITY CATEGORY: For artifacts with type "activity", set "activityCategory" to the best-matching label: "food" (restaurants, cafes, dining), "sightseeing" (landmarks, museums, tours), "culture" (theatre, concerts, galleries), "nightlife" (bars, clubs, evening entertainment), "shopping" (markets, shops, malls), "nature" (parks, hikes, beaches, outdoors), "adventure" (extreme sports, zip-lining, water sports), "wellness" (spa, yoga, fitness). Use "sightseeing" as the default if uncertain.
 - CITY NORMALISATION (critical): "destination" must always be at the city or municipality level — never a neighbourhood, district, suburb, or street. If the document mentions a sub-city area, put the parent city in "destination" and store the sub-city detail in "locationAddress". Examples: hotel in "Surry Hills" → destination="Sydney", locationAddress="Surry Hills"; activity in "The Annex, Toronto" → destination="Toronto", locationAddress="The Annex"; restaurant on "Rue du Faubourg Saint-Honoré, Paris" → destination="Paris", locationAddress="Rue du Faubourg Saint-Honoré". Apply the same rule to activity and transport artifacts.
 - GROUND TRANSPORT: Use type "ground_transport" for bus tickets, coach/shuttle bookings, train/rail reservations, ferry/boat tickets, taxi receipts, car rental confirmations, and rideshare receipts (Uber, Lyft, Bolt, etc.). Set "transportType" to the best match: "bus" (intercity coaches, airport shuttles, city buses), "train" (rail, metro, Eurostar, Amtrak, Shinkansen), "ferry" (boats, water taxis, catamarans), "car_rental" (hired cars with a rental agreement), "taxi" (metered taxi), "rideshare" (app-based rides). Use "transportType": "other" only when none of the above fits. Never use artifact type "car_rental" — always use type "ground_transport" with transportType "car_rental".
-- EXPENSE: Use type "expense" for standalone receipts, charges, or invoices that are not a booking/reservation for a specific activity or transport service (e.g. a restaurant bill, a shop receipt, a travel insurance invoice). Populate "amount", "currency", "vendor", "startDate". Set "destination" to the city where the expense occurred.
+- EXPENSE: Use type "expense" for standalone receipts, charges, or invoices that are not a booking/reservation for a specific activity or transport service (e.g. a restaurant bill, a shop receipt, a travel insurance invoice). "amount" and "startDate" are required — extract any dollar figure shown as "amount" even if you are uncertain, and infer "startDate" from context or postmark if not explicit. Also populate "currency", "vendor", and "destination" (the city where the expense occurred). Set "activityCategory" to "food" for restaurant/cafe receipts, or the best-matching label otherwise.
 - GROUND TRANSPORT DESTINATION (required): For ground_transport artifacts, "destination" is the drop-off or arrival city/station. This field MUST always be populated — never leave it blank. If no explicit drop-off location is stated (e.g. a round-trip car rental returning to pickup), use the pickup city. Use a plain city name — no airport codes, no full addresses.
 - UNCERTAIN FIELDS: For every field whose value you are inferring or guessing rather than reading explicitly from the document, add that field name to "uncertainFields". Common examples: a date inferred from surrounding context; a transportType guessed from the vendor name; a destination inferred from the document title rather than stated in the booking. An empty array means you are fully confident in all extracted values. Always include the "uncertainFields" key even when the array is empty.
 - TRIP-LEVEL: "primaryDestination" in the top-level response is the main destination city for the whole document (same logic — for round trips it is where the traveler goes, not where they live). Use plain city names only — no airport codes (e.g. "London", not "London (LHR)"). "destinations" is an ARRAY of ALL distinct cities/places the traveler will actually visit and stay (not origins, not layovers) — for a YYZ→LHR→CDG→YYZ round trip this would be ["London", "Paris"]. City names only, no airport codes. "suggestedTripName" should be a brief, evocative name like "London & Paris" or "Tokyo Adventure" — not "Trip from Toronto to Toronto".
 - DATE YEAR INFERENCE: When a document states a date without a year (e.g. "Jun 10", "Mon 10 Mar", "March 10th"), infer the year using the current date provided at the top of the request. Do not use any other default year.
 - PASSENGERS (flight artifacts): If the booking lists multiple passengers by name, populate "passengers" as an array with one entry per passenger — each entry having at minimum "name". Include "seatNumber" per passenger if individual seat assignments are shown, and "mealChoice" if meal preferences are listed. For a single-passenger document, omit "passengers" entirely. Set "passengerCount" to the total number of passengers (infer from passengers.length if not explicitly stated; omit if unknown). The top-level "seatNumber" remains the primary/first-passenger seat for backward compatibility.
 - Omit any other field that is not present in the document. Return only the JSON, no commentary.`;
+}
 
 /**
  * Parse a file from a base64-encoded buffer (PDF or image).
@@ -187,6 +189,7 @@ Rules:
 export async function parseDocumentBuffer(
   base64: string,
   mimeType: string,
+  preferredCurrency = 'CAD',
 ): Promise<Omit<ParseResult, 'generatedItinerary' | 'generatedBudget'>> {
   const today = new Date().toISOString().slice(0, 10);
   const dateCtx = `Today's date is ${today} — use this year for any dates in the document that don't include a year.`;
@@ -207,7 +210,7 @@ export async function parseDocumentBuffer(
     throw new Error(`Unsupported file type: ${mimeType}`);
   }
 
-  const raw = await callClaude(PARSE_SYSTEM, content, MODEL_PARSE);
+  const raw = await callClaude(buildParseSystem(preferredCurrency), content, MODEL_PARSE);
   return parseJsonResponse(raw);
 }
 
@@ -216,10 +219,11 @@ export async function parseDocumentBuffer(
  */
 export async function parseTextContent(
   text: string,
+  preferredCurrency = 'CAD',
 ): Promise<Omit<ParseResult, 'generatedItinerary' | 'generatedBudget'>> {
   const today = new Date().toISOString().slice(0, 10);
   const prompt = `Today's date is ${today} — use this year for any dates in the document that don't include a year.\n\nPlease parse this travel confirmation text and extract all booking information:\n\n${text}`;
-  const raw = await callClaude(PARSE_SYSTEM, prompt, MODEL_PARSE);
+  const raw = await callClaude(buildParseSystem(preferredCurrency), prompt, MODEL_PARSE);
   return parseJsonResponse(raw);
 }
 
@@ -229,9 +233,10 @@ export async function parseTextContent(
 export async function parseEmailContent(
   subject: string,
   body: string,
+  preferredCurrency = 'CAD',
 ): Promise<Omit<ParseResult, 'generatedItinerary' | 'generatedBudget'>> {
   const prompt = `Please parse this travel confirmation email and extract all booking information.\n\nSubject: ${subject}\n\n${body}`;
-  return parseTextContent(prompt);
+  return parseTextContent(prompt, preferredCurrency);
 }
 
 function parseJsonResponse(raw: string): Omit<ParseResult, 'generatedItinerary' | 'generatedBudget'> {

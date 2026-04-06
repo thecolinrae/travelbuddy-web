@@ -212,6 +212,10 @@ export interface TransportDepartureEvent extends BaseTimelineEvent {
   transportType: TransportType;
   departureLocation: string;
   arrivalLocation: string;
+  /** Geocoded coordinates for departureLocation — set at import time when Maps API key is present. */
+  departurePosition?: { lat: number; lng: number };
+  /** Geocoded coordinates for arrivalLocation — set at import time when Maps API key is present. */
+  arrivalPosition?: { lat: number; lng: number };
   vendor?: string;
   bookingRef?: string;
   notes?: string;
@@ -223,6 +227,8 @@ export interface TransportArrivalEvent extends BaseTimelineEvent {
   transportType: TransportType;
   departureLocation: string;
   arrivalLocation: string;
+  departurePosition?: { lat: number; lng: number };
+  arrivalPosition?: { lat: number; lng: number };
   vendor?: string;
   bookingRef?: string;
   notes?: string;
@@ -329,6 +335,7 @@ export interface Activity {
   type: ActivityType;
   estimatedCost?: string;
   duration?: string;
+  durationMinutes?: number;
   bestTime?: string;
   tips?: string;
   city?: string;

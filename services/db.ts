@@ -61,7 +61,7 @@ export async function createTrip(userId: string, data: TripCreateInput): Promise
       itineraryMd: data.itineraryMd ?? null,
       budgetGoal: data.budgetGoal ?? null,
       categoryGoals: data.categoryGoals ?? undefined,
-      preferredCurrency: data.preferredCurrency ?? 'USD',
+      preferredCurrency: data.preferredCurrency ?? 'CAD',
       ownerEmail: data.ownerEmail ?? null,
     },
   }) as unknown as Promise<TripRow>;

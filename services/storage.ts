@@ -107,6 +107,17 @@ export async function getArtifactUrl(storagePath: string): Promise<string> {
 }
 
 /**
+ * Download an artifact from S3 as a Buffer.
+ * Used by the export service to bundle artifacts into ZIP packages.
+ */
+export async function downloadArtifact(storagePath: string): Promise<Buffer> {
+  const s3 = getS3Client();
+  const response = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: storagePath }));
+  const bytes = await (response.Body as import('@aws-sdk/types').SdkStreamMixin).transformToByteArray();
+  return Buffer.from(bytes);
+}
+
+/**
  * Delete an artifact from S3. Called when an artifact record is removed.
  */
 export async function deleteArtifact(storagePath: string): Promise<void> {

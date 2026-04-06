@@ -8,6 +8,7 @@ import type {
   FlightDepartureEvent,
   FlightArrivalEvent,
   FlightConnectionEvent,
+  TransportDepartureEvent,
   TransportArrivalEvent,
   ActivityEvent,
 } from '@/types';
@@ -56,6 +57,9 @@ function deriveWaypoints(items: DayItem[]): Waypoint[] {
           wp = { label: (ev as FlightArrivalEvent).arrivalAirport, query: (ev as FlightArrivalEvent).arrivalAirport, id: e.id };
         }
         // connection events: no single clean location to pin
+      } else if (e.type === 'otherTransportation' && e.subtype === 'departure') {
+        const ev = e as TransportDepartureEvent;
+        wp = { label: ev.departureLocation, query: ev.departureLocation, id: e.id };
       } else if (e.type === 'otherTransportation' && e.subtype === 'arrival') {
         const ev = e as TransportArrivalEvent;
         wp = { label: ev.arrivalLocation, query: ev.arrivalLocation, id: e.id };

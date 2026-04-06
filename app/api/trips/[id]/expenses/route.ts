@@ -1,6 +1,8 @@
 import { auth } from '@/lib/auth';
 import { getTrip, loadTimeline, saveTimeline } from '@/services/db';
-import type { ExpenseEvent } from '@/types';
+import { makeCost } from '@/services/timeline';
+import { fetchRatesFromPreferred } from '@/services/currency';
+import type { Cost, ExpenseEvent } from '@/types';
 
 async function getUserId(): Promise<string | null> {
   const session = await auth();
@@ -26,8 +28,24 @@ export async function POST(
     date: string;
     amount: number;
     currency: string;
+    localAmount?: number;
+    localCurrency?: string;
     notes?: string;
   };
+
+  const preferredCurrency = body.currency;
+  let cost: Cost;
+
+  if (
+    body.localAmount !== undefined &&
+    body.localCurrency &&
+    body.localCurrency !== preferredCurrency
+  ) {
+    const { rates } = await fetchRatesFromPreferred(preferredCurrency);
+    cost = makeCost(body.localAmount, body.localCurrency, preferredCurrency, rates);
+  } else {
+    cost = { amountPreferredCurrency: body.amount, preferredCurrency };
+  }
 
   const expense: ExpenseEvent = {
     id: crypto.randomUUID(),
@@ -37,10 +55,7 @@ export async function POST(
     description: body.description,
     vendor: body.vendor,
     category: body.category,
-    cost: {
-      amountPreferredCurrency: body.amount,
-      preferredCurrency: body.currency,
-    },
+    cost,
     isManual: true,
     notes: body.notes,
   };

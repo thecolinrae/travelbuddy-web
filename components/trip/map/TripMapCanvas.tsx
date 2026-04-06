@@ -37,6 +37,9 @@ export function TripMapCanvas({ waypoints, height = 280, onSelect }: Props) {
           streetViewControl: false,
           fullscreenControl: false,
           zoomControl: true,
+          styles: [
+            { featureType: 'poi', elementType: 'labels', stylers: [{ visibility: 'off' }] },
+          ],
         });
 
         const transitLayer = new window.google.maps.TransitLayer();

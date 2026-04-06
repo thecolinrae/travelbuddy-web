@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { CalendarDays, Route, UtensilsCrossed, List } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { CalendarDays, Route, UtensilsCrossed, List, CalendarRange } from 'lucide-react';
 import { DayMapPanel } from '@/components/trip/map/DayMapPanel';
 import { Button } from '@/components/ui/button';
 import { DayNav } from './day/DayNav';
@@ -216,6 +217,7 @@ function getItemId(item: DayItem): string | null {
 }
 
 export function DayTab({ trip, tripId, timeline, activities, legs, isOwner, currentIndex, onIndexChange, onViewTimeline, onActivityUpdate }: DayTabProps) {
+  const router = useRouter();
   const [mapOpen, setMapOpen] = useState(false);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   // Pairs dismissed by the user for this session ("activityId|eventId")
@@ -380,15 +382,29 @@ export function DayTab({ trip, tripId, timeline, activities, legs, isOwner, curr
         })}
       </div>
 
-      {onViewTimeline && (
+      <div className="flex items-center justify-center gap-6">
+        {onViewTimeline && (
+          <button
+            onClick={onViewTimeline}
+            className="flex items-center gap-1.5 text-sm text-text-muted hover:text-text-base transition-colors py-1"
+          >
+            <List className="h-4 w-4" />
+            View all events
+          </button>
+        )}
         <button
-          onClick={onViewTimeline}
-          className="flex items-center gap-1.5 text-sm text-text-muted hover:text-text-base transition-colors w-full justify-center py-1"
+          onClick={() => {
+            const date = days[currentIndex] ?? days[0];
+            router.push(
+              `/trip/${tripId}/schedule?date=${date}&view=day&dayIndex=${currentIndex}`,
+            );
+          }}
+          className="flex items-center gap-1.5 text-sm text-text-muted hover:text-text-base transition-colors py-1"
         >
-          <List className="h-4 w-4" />
-          View all events
+          <CalendarRange className="h-4 w-4" />
+          Edit schedule
         </button>
-      )}
+      </div>
 
       <PlanThisDayStub />
     </div>

@@ -20,7 +20,7 @@ export default async function SettingsPage() {
         name={profile?.name ?? null}
         email={profile?.email ?? ''}
         avatarUrl={profile?.avatarUrl ?? null}
-        preferredCurrency={profile?.preferredCurrency ?? 'USD'}
+        preferredCurrency={profile?.preferredCurrency ?? 'CAD'}
       />
     </main>
   );

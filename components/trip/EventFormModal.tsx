@@ -1,7 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronDown, ChevronUp, Sparkles, Loader2 } from 'lucide-react';
+import { TimezoneSelectorField } from '@/components/trip/TimezoneSelectorField';
+import { localToUtcISO } from '@/services/timezone';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
@@ -74,14 +76,18 @@ export function EventFormModal({ tripId, open, onClose, onSaved, editing, transp
   const [date, setDate] = useState(editing?.date ?? new Date().toISOString().slice(0, 10));
   const [time, setTime] = useState(editing?.time ?? '');
   const [locationCity, setLocationCity] = useState(editing?.locationCity ?? '');
+  const [timezone, setTimezone] = useState<string | undefined>(editing?.timezone ?? undefined);
 
   // ── Activity ─────────────────────────────────────────────────────────────────
   const act = editing?.type === 'activity' ? (editing as ActivityEvent) : null;
+  const originalDescription = act?.description ?? '';
   const [description, setDescription] = useState(act?.description ?? '');
   const [actCategory, setActCategory] = useState(act?.category ?? 'sightseeing');
   const [actAddress, setActAddress] = useState(editing?.locationAddress ?? '');
   const [actNotes, setActNotes] = useState(act?.notes ?? '');
   const [actBookingRef, setActBookingRef] = useState(act?.bookingRef ?? '');
+  const [enrichedOverrides, setEnrichedOverrides] = useState<Partial<ActivityEvent>>({});
+  const [enriching, setEnriching] = useState(false);
 
   // ── Transport ─────────────────────────────────────────────────────────────────
   const tr = editing?.type === 'otherTransportation' ? (editing as TransportDepartureEvent | TransportArrivalEvent) : null;
@@ -143,6 +149,42 @@ export function EventFormModal({ tripId, open, onClose, onSaved, editing, transp
 
   const [saving, setSaving] = useState(false);
 
+  // ── Re-enrich activity details ────────────────────────────────────────────────
+  async function handleReEnrich() {
+    if (!description.trim() || enriching) return;
+    setEnriching(true);
+    try {
+      const res = await fetch(`/api/trips/${tripId}/activities/enrich`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: description.trim(), city: locationCity || undefined }),
+      });
+      if (!res.ok) return;
+      const data = await res.json() as {
+        type?: string;
+        locationAddress?: string;
+        estimatedCost?: string;
+        duration?: string;
+        bestTime?: string;
+        tips?: string;
+        familyFriendly?: boolean;
+        highlights?: string[];
+      };
+      if (data.type) setActCategory(data.type);
+      if (data.locationAddress) setActAddress(data.locationAddress);
+      setEnrichedOverrides({
+        estimatedCost: data.estimatedCost,
+        duration: data.duration,
+        bestTime: data.bestTime,
+        tips: data.tips,
+        familyFriendly: data.familyFriendly,
+        highlights: data.highlights,
+      });
+    } finally {
+      setEnriching(false);
+    }
+  }
+
   // ── Build payload ─────────────────────────────────────────────────────────────
   // Spread editing first so non-form fields (journeyId, utcISO, artifactSources, etc.)
   // are preserved exactly as-is.
@@ -153,13 +195,17 @@ export function EventFormModal({ tripId, open, onClose, onSaved, editing, transp
         ? { journeyId: transportPrefill.journeyId }
         : {};
 
-    // If the user changed date or time, the stored utcISO is no longer valid.
-    // Clear it so sorting falls back to the new local date+time instead of the old UTC value.
-    if (editing && (date !== editing.date || (time || '') !== (editing.time || ''))) {
+    // If the user changed date, time, or timezone, the stored utcISO is no longer valid.
+    if (editing && (date !== editing.date || (time || '') !== (editing.time || '') || timezone !== editing.timezone)) {
       delete (base as Partial<TimelineEvent>).utcISO;
     }
 
-    const common = { date, time: time || undefined, locationCity };
+    // Recompute utcISO client-side when we have all three values.
+    if (timezone && date && time) {
+      (base as Partial<TimelineEvent>).utcISO = localToUtcISO(date, time, timezone);
+    }
+
+    const common = { date, time: time || undefined, locationCity, timezone: timezone || undefined };
 
     if (formType === 'flightDep') {
       return {
@@ -256,6 +302,7 @@ export function EventFormModal({ tripId, open, onClose, onSaved, editing, transp
     // activity / other
     return {
       ...base,
+      ...enrichedOverrides,
       ...common,
       type: 'activity',
       description: description.trim(),
@@ -391,6 +438,14 @@ export function EventFormModal({ tripId, open, onClose, onSaved, editing, transp
             </div>
           </div>
 
+          {/* Timezone selector — all event types */}
+          <TimezoneSelectorField
+            timezone={timezone}
+            date={date}
+            onChange={setTimezone}
+            onClear={() => setTimezone(undefined)}
+          />
+
           {/* ── Activity / Other ─────────────────────────────────────────────── */}
           {(formType === 'activity' || formType === 'other') && (
             <>
@@ -402,6 +457,26 @@ export function EventFormModal({ tripId, open, onClose, onSaved, editing, transp
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="e.g. Visit the Louvre"
                 />
+                {editing && formType === 'activity' && description.trim() !== originalDescription && (
+                  <button
+                    type="button"
+                    onClick={handleReEnrich}
+                    disabled={enriching}
+                    className="flex items-center gap-1.5 text-xs text-secondary hover:underline disabled:opacity-50"
+                  >
+                    {enriching ? (
+                      <>
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Enriching details…
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="h-3 w-3" />
+                        Re-enrich details for new title
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
               <div className="flex gap-3">
                 <div className="space-y-1.5 flex-1">

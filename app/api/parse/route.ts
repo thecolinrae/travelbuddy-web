@@ -31,7 +31,7 @@ import { prisma } from '@/lib/prisma';
 import { autoCreateLegs } from '@/services/legs';
 import { uploadArtifact } from '@/services/storage';
 import { fetchDestinationPhoto } from '@/services/photos';
-import { filterOpenPlaces } from '@/services/places';
+import { filterOpenPlaces, normalizeTransportLocations } from '@/services/places';
 import type { ParsedArtifact, Activity, ImportWarning } from '@/types';
 import { validateImportedTimeline } from '@/services/importWarnings';
 import type { GmailMessage } from '@/services/gmail';
@@ -59,7 +59,7 @@ export async function POST(request: Request) {
   const emailsJson = formData.get('emails') as string | null;
   const emails: GmailMessage[] = emailsJson ? (JSON.parse(emailsJson) as GmailMessage[]) : [];
   const profile = await prisma.profile.findUnique({ where: { id: userId }, select: { preferredCurrency: true } });
-  const currency = profile?.preferredCurrency ?? 'USD';
+  const currency = profile?.preferredCurrency ?? 'CAD';
   const tripId = (formData.get('tripId') as string | null) ?? null;
   const tripName = (formData.get('tripName') as string | null) ?? '';
   const labelId = (formData.get('labelId') as string | null) ?? undefined;
@@ -122,14 +122,14 @@ export async function POST(request: Request) {
               // Text files are parsed as text content, not binary documents
               if (mime === 'text/plain' || mime === 'text/html') {
                 const text = buf.buffer.toString('utf-8');
-                return parseTextContent(preprocessTravelText(text));
+                return parseTextContent(preprocessTravelText(text), currency);
               }
-              return parseDocumentBuffer(base64, mime);
+              return parseDocumentBuffer(base64, mime, currency);
             } else if (task.kind === 'text') {
-              return parseTextContent(preprocessTravelText(task.text));
+              return parseTextContent(preprocessTravelText(task.text), currency);
             } else {
               const preprocessed = preprocessTravelText(task.email.body);
-              return parseEmailContent(task.email.subject, preprocessed);
+              return parseEmailContent(task.email.subject, preprocessed, currency);
             }
           },
           CLAUDE_PARSE_CONCURRENCY,
@@ -181,6 +181,10 @@ export async function POST(request: Request) {
             timeline = mergeTimelines(existing, timeline);
           }
         }
+
+        // Geocode transport event locations to get canonical names + coordinates.
+        // Non-fatal: if the Maps API key is absent or a location fails, originals are kept.
+        timeline = await normalizeTransportLocations(timeline);
 
         const uniqueDests = [
           ...new Set(

@@ -1,6 +1,8 @@
 import { auth } from '@/lib/auth';
 import { getTrip, loadTimeline, saveTimeline } from '@/services/db';
-import type { ExpenseEvent, TimelineEvent } from '@/types';
+import { makeCost } from '@/services/timeline';
+import { fetchRatesFromPreferred } from '@/services/currency';
+import type { Cost, ExpenseEvent, TimelineEvent } from '@/types';
 
 async function getUserId(): Promise<string | null> {
   const session = await auth();
@@ -26,6 +28,8 @@ export async function PUT(
     date: string;
     amount: number;
     currency: string;
+    localAmount: number;
+    localCurrency: string;
     notes: string;
   }>;
 
@@ -34,6 +38,22 @@ export async function PUT(
   if (idx === -1) return Response.json({ error: 'Expense not found' }, { status: 404 });
 
   const existing = timeline[idx] as ExpenseEvent;
+
+  let cost: Cost;
+  if (body.localAmount !== undefined && body.localCurrency) {
+    const preferredCurrency = body.currency ?? existing.cost.preferredCurrency;
+    const { rates } = await fetchRatesFromPreferred(preferredCurrency);
+    cost = makeCost(body.localAmount, body.localCurrency, preferredCurrency, rates);
+  } else {
+    // No local currency sent — store a plain preferred-currency cost.
+    // Any previously stored local fields are intentionally cleared because the user
+    // has edited the expense back to the preferred currency.
+    cost = {
+      amountPreferredCurrency: body.amount ?? existing.cost.amountPreferredCurrency,
+      preferredCurrency: body.currency ?? existing.cost.preferredCurrency,
+    };
+  }
+
   const updated: ExpenseEvent = {
     ...existing,
     ...(body.description !== undefined && { description: body.description }),
@@ -41,10 +61,7 @@ export async function PUT(
     ...(body.category !== undefined && { category: body.category }),
     ...(body.date !== undefined && { date: body.date }),
     ...(body.notes !== undefined && { notes: body.notes }),
-    cost: {
-      amountPreferredCurrency: body.amount ?? existing.cost.amountPreferredCurrency,
-      preferredCurrency: body.currency ?? existing.cost.preferredCurrency,
-    },
+    cost,
   };
 
   (timeline as TimelineEvent[])[idx] = updated;
