@@ -1,26 +1,11 @@
-import { auth } from '@/lib/auth';
-import { getTrip, loadActivities, saveActivities } from '@/services/db';
+import { withTripAuth, apiError } from '@/lib/api';
+import { loadActivities, saveActivities } from '@/services/db';
 import type { Activity } from '@/types';
 
-async function getUserId(): Promise<string | null> {
-  const session = await auth();
-  return (session as { userId?: string })?.userId ?? null;
-}
-
-export async function PATCH(
-  request: Request,
-  { params }: { params: Promise<{ id: string; activityId: string }> },
-) {
-  const { id, activityId } = await params;
-  const userId = await getUserId();
-  if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const trip = await getTrip(id, userId);
-  if (!trip) return Response.json({ error: 'Not found' }, { status: 404 });
-  if (trip.userId !== userId) return Response.json({ error: 'Forbidden' }, { status: 403 });
-
+export const PATCH = withTripAuth(async ({ trip, params, request }) => {
+  const { id, activityId } = params;
   const data = await loadActivities(id);
-  if (!data) return Response.json({ error: 'No activities' }, { status: 404 });
+  if (!data) return apiError('No activities', 404);
 
   const body = (await request.json()) as Partial<
     Pick<Activity, 'scheduledDate' | 'scheduledTime' | 'durationMinutes'>
@@ -34,24 +19,14 @@ export async function PATCH(
 
   const activity = updated.find((a) => a.id === activityId);
   return Response.json({ activity });
-}
+}, { requireOwner: true });
 
-export async function DELETE(
-  _request: Request,
-  { params }: { params: Promise<{ id: string; activityId: string }> },
-) {
-  const { id, activityId } = await params;
-  const userId = await getUserId();
-  if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const trip = await getTrip(id, userId);
-  if (!trip) return Response.json({ error: 'Not found' }, { status: 404 });
-  if (trip.userId !== userId) return Response.json({ error: 'Forbidden' }, { status: 403 });
-
+export const DELETE = withTripAuth(async ({ trip, params }) => {
+  const { id, activityId } = params;
   const data = await loadActivities(id);
-  if (!data) return Response.json({ error: 'No activities' }, { status: 404 });
+  if (!data) return apiError('No activities', 404);
 
   const updated = data.savedActivities.filter((a) => a.id !== activityId);
   await saveActivities(id, data.destination ?? trip.destination, updated);
   return Response.json({ ok: true });
-}
+}, { requireOwner: true });

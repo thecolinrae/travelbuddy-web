@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { Bell, Loader2, CheckCircle2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -11,24 +11,10 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet';
-
-interface NotificationTrip {
-  id: string;
-  name: string;
-}
-
-interface Notification {
-  id: string;
-  type: 'activities_generating' | 'activities_ready';
-  read: boolean;
-  createdAt: string;
-  trip: NotificationTrip;
-}
-
-interface NotificationsData {
-  notifications: Notification[];
-  unreadCount: number;
-}
+import { useQueryClient } from '@tanstack/react-query';
+import { useNotifications } from '@/hooks/use-trip-queries';
+import { useMarkNotificationsRead } from '@/hooks/use-trip-mutations';
+import { tripKeys } from '@/lib/query-keys';
 
 interface NotificationBellProps {
   /** 'sidebar' — desktop nav link style; 'mobile' — bottom tab style */
@@ -37,49 +23,23 @@ interface NotificationBellProps {
 
 export function NotificationBell({ variant = 'sidebar' }: NotificationBellProps) {
   const [open, setOpen] = useState(false);
-  const [data, setData] = useState<NotificationsData | null>(null);
-
-  const fetchNotifications = useCallback(async () => {
-    try {
-      const res = await fetch('/api/notifications');
-      if (res.ok) setData(await res.json());
-    } catch {
-      // non-fatal
-    }
-  }, []);
-
-  const markAllRead = useCallback(async () => {
-    try {
-      await fetch('/api/notifications', { method: 'PATCH' });
-      setData((prev) =>
-        prev
-          ? {
-              ...prev,
-              unreadCount: 0,
-              notifications: prev.notifications.map((n) => ({ ...n, read: true })),
-            }
-          : null,
-      );
-    } catch {
-      // non-fatal
-    }
-  }, []);
-
-  // Poll: 10s when open, 30s when closed
-  useEffect(() => {
-    fetchNotifications();
-    const interval = setInterval(fetchNotifications, open ? 10_000 : 30_000);
-    return () => clearInterval(interval);
-  }, [open, fetchNotifications]);
-
-  // Mark read when opening
-  useEffect(() => {
-    if (open && data && data.unreadCount > 0) {
-      markAllRead();
-    }
-  }, [open, data, markAllRead]);
+  const queryClient = useQueryClient();
+  const { data } = useNotifications();
+  const markAllRead = useMarkNotificationsRead();
 
   const unreadCount = data?.unreadCount ?? 0;
+  const notifications = data?.data ?? [];
+
+  function handleOpen(next: boolean) {
+    setOpen(next);
+    if (next && unreadCount > 0) {
+      // Optimistic: clear badge immediately
+      queryClient.setQueryData(tripKeys.notifications, (prev: typeof data) =>
+        prev ? { ...prev, unreadCount: 0, data: prev.data.map((n) => ({ ...n, read: true })) } : prev,
+      );
+      markAllRead.mutate();
+    }
+  }
 
   const trigger =
     variant === 'mobile' ? (
@@ -118,7 +78,7 @@ export function NotificationBell({ variant = 'sidebar' }: NotificationBellProps)
     );
 
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
+    <Sheet open={open} onOpenChange={handleOpen}>
       <SheetTrigger asChild>{trigger}</SheetTrigger>
       <SheetContent side="right" className="w-80 sm:max-w-sm">
         <SheetHeader>
@@ -126,7 +86,7 @@ export function NotificationBell({ variant = 'sidebar' }: NotificationBellProps)
         </SheetHeader>
 
         <div className="mt-6 space-y-3">
-          {!data || data.notifications.length === 0 ? (
+          {notifications.length === 0 ? (
             <div className="py-12 flex flex-col items-center gap-3 text-center">
               <div className="rounded-full bg-surface p-4">
                 <Bell className="h-8 w-8 text-text-muted" />
@@ -136,7 +96,7 @@ export function NotificationBell({ variant = 'sidebar' }: NotificationBellProps)
               </p>
             </div>
           ) : (
-            data.notifications.map((n) => (
+            notifications.map((n) => (
               <NotificationItem key={n.id} notification={n} onClose={() => setOpen(false)} />
             ))
           )}
@@ -150,7 +110,7 @@ function NotificationItem({
   notification,
   onClose,
 }: {
-  notification: Notification;
+  notification: { id: string; type: string; read: boolean; trip: { id: string; name: string } };
   onClose: () => void;
 }) {
   const isGenerating = notification.type === 'activities_generating';

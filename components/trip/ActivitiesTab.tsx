@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useSaveActivities } from '@/hooks/use-trip-mutations';
 import { Loader2, Sparkles, Compass } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -46,7 +46,7 @@ export function ActivitiesTab({
   tripEndDate,
   isOwner,
 }: Props) {
-  const router = useRouter();
+  const saveActivities = useSaveActivities(tripId);
   const [sortMode, setSortMode] = useState<SortMode>('city');
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [refreshing, setRefreshing] = useState(false);
@@ -88,12 +88,7 @@ export function ActivitiesTab({
   // ── Persistence ─────────────────────────────────────────────────────────────
 
   async function persistActivities(updated: Activity[]) {
-    await fetch(`/api/trips/${tripId}/activities`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ activities: updated, destination }),
-    });
-    router.refresh();
+    await saveActivities.mutateAsync({ activities: updated, destination });
   }
 
   // ── Handlers ─────────────────────────────────────────────────────────────────

@@ -369,3 +369,23 @@ export async function activatePendingShares(userId: string, email: string): Prom
     data: { sharedWithUserId: userId },
   });
 }
+
+/**
+ * Fetch a single timeline event by tripId + either DB pk or data->>'id'.
+ * The dual-key lookup handles rows created before the id-alignment fix where
+ * DB pk != event.id.
+ *
+ * TODO: remove the data->>'id' fallback after backfill migration is complete.
+ */
+export async function getTimelineEventByDataId(
+  tripId: string,
+  eventId: string,
+): Promise<TimelineEvent | null> {
+  const rows = await prisma.$queryRaw<Array<{ data: unknown }>>`
+    SELECT data FROM "TimelineEvent"
+    WHERE "tripId" = ${tripId} AND (id = ${eventId} OR data->>'id' = ${eventId})
+    LIMIT 1
+  `;
+  if (rows.length === 0) return null;
+  return rows[0].data as unknown as TimelineEvent;
+}

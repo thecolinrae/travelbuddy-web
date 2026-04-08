@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useMergeActivities } from '@/hooks/use-trip-mutations';
 import { Link2, Loader2, X, CheckCircle2, DollarSign, Clock, MapPin, Hash, AlertTriangle } from 'lucide-react';
 import {
   Dialog,
@@ -37,30 +37,17 @@ export function MergeActivityModal({
   event,
   onMerged,
 }: MergeActivityModalProps) {
-  const [saving, setSaving] = useState(false);
+  const mergeActivities = useMergeActivities(tripId);
   const [error, setError] = useState<string | null>(null);
-  const router = useRouter();
 
   async function handleMerge() {
-    setSaving(true);
     setError(null);
     try {
-      const res = await fetch(`/api/trips/${tripId}/activities/merge`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ activityId: activity.id, eventId: event.id }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({})) as { error?: string };
-        throw new Error(data.error ?? 'Failed to link');
-      }
+      await mergeActivities.mutateAsync({ activityId: activity.id, eventId: event.id });
       onMerged();
-      router.refresh();
       onOpenChange(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not link. Please try again.');
-    } finally {
-      setSaving(false);
     }
   }
 
@@ -156,15 +143,15 @@ export function MergeActivityModal({
         {error && <p className="text-sm text-destructive">{error}</p>}
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={mergeActivities.isPending}>
             Cancel
           </Button>
           <Button
             className="bg-primary text-primary-foreground hover:bg-primary-dark gap-2"
             onClick={handleMerge}
-            disabled={saving}
+            disabled={mergeActivities.isPending}
           >
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
+            {mergeActivities.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
             Link activities
           </Button>
         </DialogFooter>
@@ -183,7 +170,6 @@ interface MergeSuggestionChipProps {
 
 export function MergeSuggestionChip({ candidate, tripId, onDismiss }: MergeSuggestionChipProps) {
   const [modalOpen, setModalOpen] = useState(false);
-  const router = useRouter();
 
   return (
     <>
@@ -212,7 +198,7 @@ export function MergeSuggestionChip({ candidate, tripId, onDismiss }: MergeSugge
         tripId={tripId}
         activity={candidate.activity}
         event={candidate.event}
-        onMerged={() => router.refresh()}
+        onMerged={() => {}}
       />
     </>
   );

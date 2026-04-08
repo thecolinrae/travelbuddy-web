@@ -36,7 +36,7 @@ export function ShareModal({ tripId, open, onClose }: Props) {
     setLoading(true);
     fetch(`/api/trips/${tripId}/shares`)
       .then((r) => r.json())
-      .then((data: { shares?: Share[] }) => setShares(data.shares ?? []))
+      .then((result: { data?: Share[] }) => setShares(result.data ?? []))
       .catch(() => toast.error('Failed to load shares'))
       .finally(() => setLoading(false));
   }, [open, tripId]);

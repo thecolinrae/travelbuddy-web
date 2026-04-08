@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
+import { tripKeys } from '@/lib/query-keys';
 import { AlertTriangle, CheckCircle2, X, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { EventFormModal } from './EventFormModal';
@@ -62,7 +63,7 @@ export function ImportReviewBanner({
   onEventReviewed,
   onDismiss,
 }: Props) {
-  const router = useRouter();
+  const queryClient = useQueryClient();
   const [fixingEventId, setFixingEventId] = useState<string | null>(null);
 
   const pendingCount = warnings.length - reviewedIds.size;
@@ -159,7 +160,7 @@ export function ImportReviewBanner({
             onSaved={() => {
               onEventReviewed(fixingEventId);
               setFixingEventId(null);
-              router.refresh();
+              queryClient.invalidateQueries({ queryKey: tripKeys.timeline(tripId) });
             }}
           />
         );

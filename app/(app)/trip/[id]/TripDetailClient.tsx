@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import Image from 'next/image';
 import { ArrowLeft, Plus, Share2, Pencil, Trash2, MessageCircle, Route, Download } from 'lucide-react';
@@ -26,10 +27,14 @@ import { DocumentsTab } from '@/components/trip/DocumentsTab';
 import { NotesTab } from '@/components/trip/NotesTab';
 import { TripChatPanel } from '@/components/trip/TripChatPanel';
 import { CityMapView } from '@/components/trip/map/CityMapView';
+import { useTrip, useTripTimeline, useTripActivities, useTripLegs } from '@/hooks/use-trip-queries';
+import { useDeleteTrip } from '@/hooks/use-trip-mutations';
+import { tripKeys } from '@/lib/query-keys';
 import type { ArtifactInfo } from '@/components/trip/DocumentsTab';
 import type { TimelineEvent, Activity, BudgetItemCategory, ImportWarning } from '@/types';
 import type { LegSummary } from '@/components/trip/DayTab';
 import type { LabelSync } from '@/services/db';
+import type { TripData } from '@/hooks/use-trip-queries';
 
 type TabId =
   | 'day'
@@ -49,23 +54,6 @@ function buildTabs(status: string) {
     { id: 'documents' as const,   label: 'Documents'   },
     { id: 'notes' as const,       label: 'Notes'       },
   ];
-}
-
-interface TripData {
-  id: string;
-  name: string;
-  destination: string;
-  destinations: string[];
-  startDate: string | null;
-  endDate: string | null;
-  status: string;
-  coverEmoji: string;
-  coverPhotoUrl: string | null;
-  itineraryMd: string | null;
-  notes: string | null;
-  budgetGoal: number | null;
-  categoryGoals: Partial<Record<BudgetItemCategory, number>> | null;
-  preferredCurrency: string;
 }
 
 interface Props {
@@ -88,14 +76,28 @@ function formatDateRange(start: string | null, end: string | null): string {
   return fmt((start ?? end)!);
 }
 
-export function TripDetailClient({ trip, timeline, legs, activities: initialActivities, artifacts, labelSyncs, isOwner }: Props) {
+export function TripDetailClient({
+  trip: initialTrip,
+  timeline: initialTimeline,
+  legs: initialLegs,
+  activities: initialActivities,
+  artifacts,
+  labelSyncs,
+  isOwner,
+}: Props) {
   const router = useRouter();
+  const queryClient = useQueryClient();
+
+  // React Query — seeded from RSC initial data
+  const { data: trip = initialTrip } = useTrip(initialTrip.id, initialTrip);
+  const { data: timeline = initialTimeline } = useTripTimeline(initialTrip.id, initialTimeline);
+  const { data: activities = initialActivities } = useTripActivities(initialTrip.id, initialActivities);
+  const { data: legs = initialLegs } = useTripLegs(initialTrip.id, initialLegs);
+
+  const deleteTripMutation = useDeleteTrip(initialTrip.id);
+
   const TABS = buildTabs(trip.status);
   const [activeTab, setActiveTab] = useState<TabId>('day');
-  const [activities, setActivities] = useState(initialActivities);
-
-  // Sync when router.refresh() delivers updated server data (e.g. after ActivitiesTab saves)
-  useEffect(() => { setActivities(initialActivities); }, [initialActivities]);
 
   const days = useMemo(
     () => buildDayRange(trip.startDate, trip.endDate, timeline, activities),
@@ -119,13 +121,30 @@ export function TripDetailClient({ trip, timeline, legs, activities: initialActi
   const [reviewedIds, setReviewedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    const key = `importWarnings:${trip.id}`;
+    const key = `importWarnings:${initialTrip.id}`;
     const raw = sessionStorage.getItem(key);
     if (raw) {
       try { setImportWarnings(JSON.parse(raw) as ImportWarning[]); } catch { /* ignore */ }
       sessionStorage.removeItem(key);
     }
-  }, [trip.id]);
+  }, [initialTrip.id]);
+
+  // Chat panel uses this to invalidate activities + timeline after tool calls
+  const handleActivityMutation = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: tripKeys.activities(initialTrip.id) });
+    queryClient.invalidateQueries({ queryKey: tripKeys.timeline(initialTrip.id) });
+  }, [queryClient, initialTrip.id]);
+
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      await deleteTripMutation.mutateAsync();
+      router.push('/');
+    } finally {
+      setDeleting(false);
+      setDeleteConfirm(false);
+    }
+  }
 
   const destinations =
     trip.destinations?.length > 1
@@ -137,32 +156,6 @@ export function TripDetailClient({ trip, timeline, legs, activities: initialActi
   const hasTransport = timeline.some(
     (e) => e.type === 'flight' || e.type === 'otherTransportation',
   );
-
-  async function handleActivityMutation() {
-    // Directly update activities state so the Activities tab reflects changes
-    // immediately, without waiting for router.refresh() to complete.
-    try {
-      const res = await fetch(`/api/trips/${trip.id}/activities`);
-      if (res.ok) {
-        const data = (await res.json()) as { savedActivities: Activity[] };
-        setActivities(data.savedActivities ?? []);
-      }
-    } catch {
-      // Non-fatal — router.refresh() below will still sync the page
-    }
-    router.refresh();
-  }
-
-  async function handleDelete() {
-    setDeleting(true);
-    try {
-      await fetch(`/api/trips/${trip.id}`, { method: 'DELETE' });
-      router.push('/');
-    } finally {
-      setDeleting(false);
-      setDeleteConfirm(false);
-    }
-  }
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -234,7 +227,7 @@ export function TripDetailClient({ trip, timeline, legs, activities: initialActi
               variant="ghost"
               className="h-8 w-8 text-white/90 hover:text-white hover:bg-white/15 border border-white/20"
             >
-              <Link href={`/trip/${trip.id}/transport`} aria-label="View transport">
+              <Link href={`/trip/${initialTrip.id}/transport`} aria-label="View transport">
                 <Route className="h-4 w-4" />
               </Link>
             </Button>
@@ -245,7 +238,7 @@ export function TripDetailClient({ trip, timeline, legs, activities: initialActi
             variant="ghost"
             className="h-8 w-8 text-white/90 hover:text-white hover:bg-white/15 border border-white/20"
           >
-            <Link href={`/import?tripId=${trip.id}`} aria-label="Add documents">
+            <Link href={`/import?tripId=${initialTrip.id}`} aria-label="Add documents">
               <Plus className="h-4 w-4" />
             </Link>
           </Button>
@@ -310,7 +303,7 @@ export function TripDetailClient({ trip, timeline, legs, activities: initialActi
             warnings={importWarnings}
             reviewedIds={reviewedIds}
             timeline={timeline}
-            tripId={trip.id}
+            tripId={initialTrip.id}
             onEventReviewed={(id) => setReviewedIds((prev) => new Set([...prev, id]))}
             onDismiss={() => setImportWarnings([])}
           />
@@ -322,7 +315,7 @@ export function TripDetailClient({ trip, timeline, legs, activities: initialActi
         {activeTab === 'day' && (
           <DayTab
             trip={trip}
-            tripId={trip.id}
+            tripId={initialTrip.id}
             timeline={timeline}
             activities={activities}
             legs={legs}
@@ -330,7 +323,9 @@ export function TripDetailClient({ trip, timeline, legs, activities: initialActi
             currentIndex={dayIndex}
             onIndexChange={setDayIndex}
             onViewTimeline={() => setActiveTab('timeline')}
-            onActivityUpdate={setActivities}
+            onActivityUpdate={(updated) =>
+              queryClient.setQueryData(tripKeys.activities(initialTrip.id), updated)
+            }
           />
         )}
         {activeTab === 'timeline' && (
@@ -343,7 +338,7 @@ export function TripDetailClient({ trip, timeline, legs, activities: initialActi
               Back to {trip.status === 'active' ? 'Today' : 'Day'}
             </button>
             <TimelineTab
-              tripId={trip.id}
+              tripId={initialTrip.id}
               timeline={timeline}
               activities={activities}
               isOwner={isOwner}
@@ -359,7 +354,7 @@ export function TripDetailClient({ trip, timeline, legs, activities: initialActi
         )}
         {activeTab === 'spend' && (
           <SpendTab
-            tripId={trip.id}
+            tripId={initialTrip.id}
             timeline={timeline}
             budgetGoal={trip.budgetGoal}
             categoryGoals={trip.categoryGoals}
@@ -367,9 +362,9 @@ export function TripDetailClient({ trip, timeline, legs, activities: initialActi
             isOwner={isOwner}
           />
         )}
-{activeTab === 'activities' && (
+        {activeTab === 'activities' && (
           <ActivitiesTab
-            tripId={trip.id}
+            tripId={initialTrip.id}
             destination={trip.destination}
             destinations={trip.destinations}
             activities={activities}
@@ -382,14 +377,14 @@ export function TripDetailClient({ trip, timeline, legs, activities: initialActi
         {activeTab === 'documents' && (
           <DocumentsTab
             artifacts={artifacts}
-            tripId={trip.id}
+            tripId={initialTrip.id}
             isOwner={isOwner}
             labelSyncs={labelSyncs}
           />
         )}
         {activeTab === 'notes' && (
           <NotesTab
-            tripId={trip.id}
+            tripId={initialTrip.id}
             notes={trip.notes}
             isOwner={isOwner}
           />
@@ -409,7 +404,7 @@ export function TripDetailClient({ trip, timeline, legs, activities: initialActi
       </button>
 
       <TripChatPanel
-        tripId={trip.id}
+        tripId={initialTrip.id}
         isOpen={chatOpen}
         onClose={() => setChatOpen(false)}
         currentDayIndex={dayIndex}
@@ -420,15 +415,15 @@ export function TripDetailClient({ trip, timeline, legs, activities: initialActi
       <ExportModal
         open={exportOpen}
         onClose={() => setExportOpen(false)}
-        tripId={trip.id}
+        tripId={initialTrip.id}
         tripName={trip.name}
       />
       {isOwner && (
-        <ShareModal tripId={trip.id} open={shareOpen} onClose={() => setShareOpen(false)} />
+        <ShareModal tripId={initialTrip.id} open={shareOpen} onClose={() => setShareOpen(false)} />
       )}
       {isOwner && editOpen && (
         <TripEditModal
-          tripId={trip.id}
+          tripId={initialTrip.id}
           open={editOpen}
           onClose={() => setEditOpen(false)}
           initial={{

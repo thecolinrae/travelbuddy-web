@@ -7,8 +7,8 @@
  *   pdf      — Printable trip binder (cover, quick ref, daily itinerary, budget)
  */
 
-import { auth } from '@/lib/auth';
-import { getTrip, loadTimeline, loadActivities, listArtifacts } from '@/services/db';
+import { withTripAuth, apiError } from '@/lib/api';
+import { loadTimeline, loadActivities, listArtifacts } from '@/services/db';
 import { listLegs } from '@/services/legs';
 import { downloadArtifact } from '@/services/storage';
 import { assembleTripExport } from '@/services/export/json';
@@ -16,26 +16,12 @@ import { generateMarkdown } from '@/services/export/markdown';
 import { renderTripBinderPdf } from '@/services/export/pdf';
 import JSZip from 'jszip';
 
-async function getUserId(): Promise<string | null> {
-  const session = await auth();
-  return (session as { userId?: string })?.userId ?? null;
-}
-
 function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
-export async function GET(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { id } = await params;
-  const userId = await getUserId();
-  if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const trip = await getTrip(id, userId);
-  if (!trip) return Response.json({ error: 'Not found' }, { status: 404 });
-
+export const GET = withTripAuth(async ({ trip, params, request }) => {
+  const { id } = params;
   const format = new URL(request.url).searchParams.get('format') ?? 'zip';
 
   const [timeline, activitiesData, artifacts, legRows] = await Promise.all([
@@ -115,9 +101,9 @@ export async function GET(
       const msg = err instanceof Error ? err.message : String(err);
       const stack = err instanceof Error ? err.stack : '';
       console.error('[PDF export error]', msg, stack);
-      return Response.json({ error: msg }, { status: 500 });
+      return apiError(msg, 500);
     }
   }
 
-  return Response.json({ error: 'Invalid format. Use ?format=zip|markdown|pdf' }, { status: 400 });
-}
+  return apiError('Invalid format. Use ?format=zip|markdown|pdf', 400);
+});

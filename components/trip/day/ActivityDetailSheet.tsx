@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
+import { useUnmergeActivities } from '@/hooks/use-trip-mutations';
+import { tripKeys } from '@/lib/query-keys';
 import {
   Loader2, DollarSign, Clock, MapPin, Sun, Users, Sparkles, Info, Pencil, Link2, Unlink,
 } from 'lucide-react';
@@ -49,7 +51,8 @@ export function ActivityDetailSheet({
   isOwner,
   onActivityUpdate,
 }: ActivityDetailSheetProps) {
-  const router = useRouter();
+  const queryClient = useQueryClient();
+  const unmergeActivities = useUnmergeActivities(tripId);
   const [live, setLive] = useState<Activity>(activity);
   const [enriching, setEnriching] = useState(false);
   const [enrichError, setEnrichError] = useState<string | null>(null);
@@ -123,7 +126,7 @@ export function ActivityDetailSheet({
         body: JSON.stringify({ activities: updatedList }),
       });
       onActivityUpdate(updatedList);
-      router.refresh();
+      queryClient.invalidateQueries({ queryKey: tripKeys.activities(tripId) });
     } catch {
       setEnrichError("Couldn't fetch details. Try again.");
     } finally {
@@ -135,16 +138,11 @@ export function ActivityDetailSheet({
     if (!live.linkedEventId) return;
     setUnlinking(true);
     try {
-      await fetch(`/api/trips/${tripId}/activities/merge`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ activityId: live.id, eventId: live.linkedEventId }),
-      });
+      await unmergeActivities.mutateAsync({ activityId: live.id, eventId: live.linkedEventId });
       const unlinked = { ...live, linkedEventId: undefined };
       setLive(unlinked);
       const updatedList = activities.map((a) => (a.id === unlinked.id ? unlinked : a));
       onActivityUpdate(updatedList);
-      router.refresh();
     } finally {
       setUnlinking(false);
     }
@@ -354,7 +352,7 @@ export function ActivityDetailSheet({
               body: JSON.stringify({ activities: updatedList }),
             });
             onActivityUpdate(updatedList);
-            router.refresh();
+            queryClient.invalidateQueries({ queryKey: tripKeys.activities(tripId) });
             setEditOpen(false);
           }}
           onClose={() => setEditOpen(false)}

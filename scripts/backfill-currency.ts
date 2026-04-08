@@ -16,8 +16,7 @@
  */
 
 import { PrismaClient } from '@prisma/client';
-import { fetchRatesFromPreferred } from '../services/currency';
-import { makeCost } from '../services/timeline';
+import { fetchRatesFromPreferred, makeCost } from '../services/currency';
 import type { TimelineEvent, ExpenseEvent, Cost } from '../types';
 
 const prisma = new PrismaClient();

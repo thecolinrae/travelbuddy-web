@@ -1,5 +1,5 @@
-import { auth } from '@/lib/auth';
-import { getTrip, loadTimeline, saveTimeline, loadActivities, saveActivities, updateBudgetGoals } from '@/services/db';
+import { withTripAuth } from '@/lib/api';
+import { loadTimeline, saveTimeline, loadActivities, saveActivities, updateBudgetGoals } from '@/services/db';
 import { buildTripContext } from '@/services/tripContext';
 import {
   streamTripChat,
@@ -615,18 +615,8 @@ async function executeTool(
 
 // ─── Route handler ────────────────────────────────────────────────────────────
 
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const session = await auth();
-  const userId = (session as { userId?: string })?.userId;
-  if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const { id: tripId } = await params;
-  const trip = await getTrip(tripId, userId);
-  if (!trip) return Response.json({ error: 'Not found' }, { status: 404 });
-
+export const POST = withTripAuth(async ({ userId, trip, params, request }) => {
+  const { id: tripId } = params;
   const isOwner = trip.userId === userId;
 
   const body = (await request.json()) as ChatRequest;
@@ -743,4 +733,4 @@ export async function POST(
       Connection: 'keep-alive',
     },
   });
-}
+});

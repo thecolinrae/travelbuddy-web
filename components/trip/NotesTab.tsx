@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useSaveNotes } from '@/hooks/use-trip-mutations';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Button } from '@/components/ui/button';
@@ -13,24 +13,13 @@ interface Props {
 }
 
 export function NotesTab({ tripId, notes, isOwner }: Props) {
-  const router = useRouter();
+  const saveNotes = useSaveNotes(tripId);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(notes ?? '');
-  const [saving, setSaving] = useState(false);
 
   async function handleSave() {
-    setSaving(true);
-    try {
-      await fetch(`/api/trips/${tripId}/notes`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ notes: draft }),
-      });
-      router.refresh();
-      setEditing(false);
-    } finally {
-      setSaving(false);
-    }
+    await saveNotes.mutateAsync(draft);
+    setEditing(false);
   }
 
   function handleDiscard() {
@@ -49,11 +38,11 @@ export function NotesTab({ tripId, notes, isOwner }: Props) {
           autoFocus
         />
         <div className="flex gap-2 justify-end">
-          <Button variant="outline" onClick={handleDiscard} disabled={saving}>
+          <Button variant="outline" onClick={handleDiscard} disabled={saveNotes.isPending}>
             Discard
           </Button>
-          <Button onClick={handleSave} disabled={saving}>
-            {saving ? 'Saving…' : 'Save notes'}
+          <Button onClick={handleSave} disabled={saveNotes.isPending}>
+            {saveNotes.isPending ? 'Saving…' : 'Save notes'}
           </Button>
         </div>
       </div>

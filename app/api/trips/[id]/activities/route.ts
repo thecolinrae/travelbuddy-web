@@ -1,41 +1,17 @@
-import { auth } from '@/lib/auth';
-import { getTrip, loadActivities, saveActivities } from '@/services/db';
+import { withTripAuth } from '@/lib/api';
+import { loadActivities, saveActivities } from '@/services/db';
 import type { Activity } from '@/types';
 
-async function getUserId(): Promise<string | null> {
-  const session = await auth();
-  return (session as { userId?: string })?.userId ?? null;
-}
-
-export async function GET(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { id } = await params;
-  const userId = await getUserId();
-  if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const trip = await getTrip(id, userId);
-  if (!trip) return Response.json({ error: 'Not found' }, { status: 404 });
-
+export const GET = withTripAuth(async ({ trip, params }) => {
+  const { id } = params;
   const data = await loadActivities(id);
-  return Response.json({ savedActivities: data?.savedActivities ?? [] });
-}
+  return Response.json({ data: data?.savedActivities ?? [] });
+});
 
-export async function PUT(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { id } = await params;
-  const userId = await getUserId();
-  if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const trip = await getTrip(id, userId);
-  if (!trip) return Response.json({ error: 'Not found' }, { status: 404 });
-  if (trip.userId !== userId) return Response.json({ error: 'Forbidden' }, { status: 403 });
-
+export const PUT = withTripAuth(async ({ trip, params, request }) => {
+  const { id } = params;
   const body = (await request.json()) as { activities: Activity[]; destination?: string };
 
   await saveActivities(id, body.destination ?? trip.destination, body.activities);
   return Response.json({ ok: true });
-}
+}, { requireOwner: true });

@@ -91,6 +91,27 @@ export async function fetchRatesFromPreferred(preferred: string): Promise<RateRe
  * Rates param: 1 preferred = rates[other] other
  * → to convert other→preferred: amount / rates[other]  (shown as 1 other = 1/rates[other] preferred)
  */
+/** Build a Cost object, computing preferred amount if rates are provided. */
+export function makeCost(
+  localAmount: number,
+  localCurrency: string,
+  preferredCurrency: string,
+  rates: Record<string, number>,
+): import('@/types').Cost {
+  if (localCurrency === preferredCurrency) {
+    return { amountPreferredCurrency: localAmount, preferredCurrency };
+  }
+  const rate = rates[localCurrency] ?? 1;
+  const amountPreferredCurrency = Math.round((localAmount / rate) * 100) / 100;
+  return {
+    amountPreferredCurrency,
+    preferredCurrency,
+    amountLocalCurrency: localAmount,
+    localCurrency,
+    conversionRate: rate,
+  };
+}
+
 export function buildRateContext(preferred: string, result: RateResult): string {
   const lines = Object.entries(result.rates)
     .filter(([code]) => code !== preferred && APPROX_TO_USD[code] !== undefined)

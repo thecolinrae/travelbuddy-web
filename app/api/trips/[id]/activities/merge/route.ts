@@ -1,5 +1,5 @@
-import { auth } from '@/lib/auth';
-import { getTrip, loadActivities, saveActivities, loadTimeline, saveTimeline } from '@/services/db';
+import { withTripAuth, apiError } from '@/lib/api';
+import { loadActivities, saveActivities, loadTimeline, saveTimeline } from '@/services/db';
 import type { ActivityEvent } from '@/types';
 
 interface MergeBody {
@@ -7,19 +7,8 @@ interface MergeBody {
   eventId: string;
 }
 
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const session = await auth();
-  const userId = (session as { userId?: string })?.userId;
-  if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const { id: tripId } = await params;
-  const trip = await getTrip(tripId, userId);
-  if (!trip) return Response.json({ error: 'Not found' }, { status: 404 });
-  if (trip.userId !== userId) return Response.json({ error: 'Forbidden' }, { status: 403 });
-
+export const POST = withTripAuth(async ({ trip, params, request }) => {
+  const { id: tripId } = params;
   const { activityId, eventId } = (await request.json()) as MergeBody;
 
   const [activitiesData, timeline] = await Promise.all([
@@ -29,22 +18,22 @@ export async function POST(
 
   const activities = activitiesData?.savedActivities ?? [];
   const activityIdx = activities.findIndex((a) => a.id === activityId);
-  if (activityIdx === -1) return Response.json({ error: 'Activity not found' }, { status: 404 });
+  if (activityIdx === -1) return apiError('Activity not found', 404);
 
   const eventIdx = timeline.findIndex((e) => e.id === eventId);
-  if (eventIdx === -1) return Response.json({ error: 'Event not found' }, { status: 404 });
+  if (eventIdx === -1) return apiError('Event not found', 404);
 
   const event = timeline[eventIdx];
   if (event.type !== 'activity') {
-    return Response.json({ error: 'Event is not an activity' }, { status: 400 });
+    return apiError('Event is not an activity', 400);
   }
 
   const activity = activities[activityIdx];
   if (activity.linkedEventId) {
-    return Response.json({ error: 'Activity is already linked to an event' }, { status: 400 });
+    return apiError('Activity is already linked to an event', 400);
   }
   if ((event as ActivityEvent).linkedActivityId) {
-    return Response.json({ error: 'Event is already linked to an activity' }, { status: 400 });
+    return apiError('Event is already linked to an activity', 400);
   }
 
   activities[activityIdx] = { ...activity, linkedEventId: eventId };
@@ -56,21 +45,10 @@ export async function POST(
   ]);
 
   return Response.json({ ok: true });
-}
+}, { requireOwner: true });
 
-export async function DELETE(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const session = await auth();
-  const userId = (session as { userId?: string })?.userId;
-  if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const { id: tripId } = await params;
-  const trip = await getTrip(tripId, userId);
-  if (!trip) return Response.json({ error: 'Not found' }, { status: 404 });
-  if (trip.userId !== userId) return Response.json({ error: 'Forbidden' }, { status: 403 });
-
+export const DELETE = withTripAuth(async ({ trip, params, request }) => {
+  const { id: tripId } = params;
   const { activityId, eventId } = (await request.json()) as MergeBody;
 
   const [activitiesData, timeline] = await Promise.all([
@@ -98,4 +76,4 @@ export async function DELETE(
   ]);
 
   return Response.json({ ok: true });
-}
+}, { requireOwner: true });

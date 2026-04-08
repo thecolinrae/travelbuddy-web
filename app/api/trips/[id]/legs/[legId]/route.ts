@@ -1,27 +1,11 @@
-import { auth } from '@/lib/auth';
-import { getTrip } from '@/services/db';
+import { withTripAuth, apiError } from '@/lib/api';
 import { getLeg, updateLeg, deleteLeg } from '@/services/legs';
 
-async function getUserId(): Promise<string | null> {
-  const session = await auth();
-  return (session as { userId?: string })?.userId ?? null;
-}
-
 // PATCH /api/trips/[id]/legs/[legId] — rename or reorder a leg
-export async function PATCH(
-  request: Request,
-  { params }: { params: Promise<{ id: string; legId: string }> },
-) {
-  const { id, legId } = await params;
-  const userId = await getUserId();
-  if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const trip = await getTrip(id, userId);
-  if (!trip) return Response.json({ error: 'Not found' }, { status: 404 });
-  if (trip.userId !== userId) return Response.json({ error: 'Forbidden' }, { status: 403 });
-
+export const PATCH = withTripAuth(async ({ params, request }) => {
+  const { id, legId } = params;
   const leg = await getLeg(legId);
-  if (!leg || leg.tripId !== id) return Response.json({ error: 'Leg not found' }, { status: 404 });
+  if (!leg || leg.tripId !== id) return apiError('Leg not found', 404);
 
   const body = (await request.json()) as { name?: string; order?: number };
 
@@ -31,24 +15,14 @@ export async function PATCH(
   });
 
   return Response.json({ leg: updated });
-}
+}, { requireOwner: true });
 
 // DELETE /api/trips/[id]/legs/[legId] — delete leg (events become unassigned)
-export async function DELETE(
-  _request: Request,
-  { params }: { params: Promise<{ id: string; legId: string }> },
-) {
-  const { id, legId } = await params;
-  const userId = await getUserId();
-  if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const trip = await getTrip(id, userId);
-  if (!trip) return Response.json({ error: 'Not found' }, { status: 404 });
-  if (trip.userId !== userId) return Response.json({ error: 'Forbidden' }, { status: 403 });
-
+export const DELETE = withTripAuth(async ({ params }) => {
+  const { id, legId } = params;
   const leg = await getLeg(legId);
-  if (!leg || leg.tripId !== id) return Response.json({ error: 'Leg not found' }, { status: 404 });
+  if (!leg || leg.tripId !== id) return apiError('Leg not found', 404);
 
   await deleteLeg(legId);
   return Response.json({ ok: true });
-}
+}, { requireOwner: true });

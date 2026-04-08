@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
+import { useSaveBudget, useDeleteExpense } from '@/hooks/use-trip-mutations';
+import { tripKeys } from '@/lib/query-keys';
 import {
   Pencil, Check, X, Receipt, Plus, Trash2, Loader2, ChevronDown,
   Plane, Building2, Car, Binoculars, Bus, UtensilsCrossed, Shield, MoreHorizontal,
@@ -145,7 +147,9 @@ interface Props {
 }
 
 export function SpendTab({ tripId, timeline, budgetGoal, categoryGoals, currency, isOwner }: Props) {
-  const router = useRouter();
+  const queryClient = useQueryClient();
+  const saveBudget = useSaveBudget(tripId);
+  const deleteExpense = useDeleteExpense(tripId);
 
   // ── Expense CRUD state
   const [addOpen, setAddOpen] = useState(false);
@@ -193,19 +197,13 @@ export function SpendTab({ tripId, timeline, budgetGoal, categoryGoals, currency
     newBudgetGoal: number | null,
     newCategoryGoals: Partial<Record<BudgetItemCategory, number>> | null,
   ) {
-    await fetch(`/api/trips/${tripId}/budget`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ budgetGoal: newBudgetGoal, categoryGoals: newCategoryGoals }),
-    });
-    router.refresh();
+    await saveBudget.mutateAsync({ budgetGoal: newBudgetGoal, categoryGoals: newCategoryGoals });
   }
 
   async function handleDelete(id: string) {
     setDeleting(id);
     try {
-      await fetch(`/api/trips/${tripId}/expenses/${id}`, { method: 'DELETE' });
-      router.refresh();
+      await deleteExpense.mutateAsync(id);
     } finally {
       setDeleting(null);
       setConfirmDelete(null);
@@ -514,7 +512,7 @@ export function SpendTab({ tripId, timeline, budgetGoal, categoryGoals, currency
           currency={currency}
           open={addOpen}
           onClose={() => setAddOpen(false)}
-          onSaved={() => router.refresh()}
+          onSaved={() => queryClient.invalidateQueries({ queryKey: tripKeys.timeline(tripId) })}
         />
       )}
       {editing && (
@@ -523,7 +521,7 @@ export function SpendTab({ tripId, timeline, budgetGoal, categoryGoals, currency
           currency={currency}
           open={!!editing}
           onClose={() => setEditing(null)}
-          onSaved={() => router.refresh()}
+          onSaved={() => queryClient.invalidateQueries({ queryKey: tripKeys.timeline(tripId) })}
           editing={editing}
         />
       )}

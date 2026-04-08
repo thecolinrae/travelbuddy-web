@@ -1,7 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
+import { useDeleteTimelineEvent, useSaveActivities, useSaveTimelineEvent } from '@/hooks/use-trip-mutations';
+import { tripKeys } from '@/lib/query-keys';
+import { useTimelineGroups, eventSortMs, activitySortMs } from '@/hooks/use-timeline-groups';
 import {
   Plus, Pencil, Trash2, Loader2, CalendarDays,
   PlaneTakeoff, PlaneLanding, GitMerge,
@@ -18,7 +21,7 @@ import { EventFormModal, type TransportPrefill } from './EventFormModal';
 import { MergeDndContext } from './dnd/MergeDndContext';
 import { DraggableItem } from './dnd/DraggableItem';
 import { DroppableTarget } from './dnd/DroppableTarget';
-import type { TimelineEvent, ExpenseEvent, TransportType, TransportDepartureEvent, TransportArrivalEvent, Activity, ActivityEvent } from '@/types';
+import type { TimelineEvent, TransportType, TransportDepartureEvent, TransportArrivalEvent, Activity, ActivityEvent } from '@/types';
 import { nanoid } from '@/services/nanoid';
 
 const TRANSPORT_ICONS: Record<TransportType, React.ComponentType<{ className?: string }>> = {
@@ -90,7 +93,10 @@ interface Props {
 }
 
 export function TimelineTab({ tripId, timeline, activities, isOwner }: Props) {
-  const router = useRouter();
+  const queryClient = useQueryClient();
+  const deleteEvent = useDeleteTimelineEvent(tripId);
+  const saveActivities = useSaveActivities(tripId);
+  const saveTimelineEvent = useSaveTimelineEvent(tripId);
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<TimelineEvent | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -103,8 +109,7 @@ export function TimelineTab({ tripId, timeline, activities, isOwner }: Props) {
   async function handleDelete(id: string) {
     setDeleting(id);
     try {
-      await fetch(`/api/trips/${tripId}/timeline/${id}`, { method: 'DELETE' });
-      router.refresh();
+      await deleteEvent.mutateAsync(id);
     } finally {
       setDeleting(null);
       setConfirmDelete(null);
@@ -114,12 +119,7 @@ export function TimelineTab({ tripId, timeline, activities, isOwner }: Props) {
   async function handleDeleteActivity(id: string) {
     setDeletingActivity(id);
     try {
-      await fetch(`/api/trips/${tripId}/activities`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ activities: activities.filter((a) => a.id !== id) }),
-      });
-      router.refresh();
+      await saveActivities.mutateAsync({ activities: activities.filter((a) => a.id !== id) });
     } finally {
       setDeletingActivity(null);
       setConfirmDeleteActivity(null);
@@ -127,14 +127,19 @@ export function TimelineTab({ tripId, timeline, activities, isOwner }: Props) {
   }
 
   async function handleEditActivity(updated: Activity) {
-    await fetch(`/api/trips/${tripId}/activities`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ activities: activities.map((a) => (a.id === updated.id ? updated : a)) }),
-    });
-    router.refresh();
+    await saveActivities.mutateAsync({ activities: activities.map((a) => (a.id === updated.id ? updated : a)) });
     setEditingActivity(null);
   }
+
+  const {
+    days,
+    byDate,
+    activitiesByDate,
+    linkedExpenses,
+    getMissingCounterpart,
+    unlinkedActivityEvents,
+    unlinkedActivities,
+  } = useTimelineGroups(timeline, activities);
 
   const hasContent = timeline.some((e) => e.type !== 'expense') || activities.some((a) => a.saved && a.scheduledDate);
   if (!hasContent) {
@@ -161,46 +166,11 @@ export function TimelineTab({ tripId, timeline, activities, isOwner }: Props) {
             tripId={tripId}
             open={addOpen}
             onClose={() => setAddOpen(false)}
-            onSaved={() => router.refresh()}
+            onSaved={() => queryClient.invalidateQueries({ queryKey: tripKeys.timeline(tripId) })}
           />
         )}
       </div>
     );
-  }
-
-  // Build a map of linked expenses keyed by their parent event id.
-  // Expenses without a linkedEventId are not shown in the Timeline at all
-  // (they live in the Expenses tab).
-  const linkedExpenses = new Map<string, ExpenseEvent[]>();
-  for (const e of timeline) {
-    if (e.type !== 'expense') continue;
-    const exp = e as ExpenseEvent;
-    if (!exp.linkedEventId) continue;
-    const bucket = linkedExpenses.get(exp.linkedEventId) ?? [];
-    bucket.push(exp);
-    linkedExpenses.set(exp.linkedEventId, bucket);
-  }
-
-  // Detect orphaned transport legs: events with journeyId missing their counterpart,
-  // and events with no journeyId at all (manually created / corrected events).
-  const transportJourneys = new Map<string, { dep?: TransportDepartureEvent; arr?: TransportArrivalEvent }>();
-  for (const e of timeline) {
-    if (e.type !== 'otherTransportation' || !e.journeyId) continue;
-    const j = transportJourneys.get(e.journeyId) ?? {};
-    if (e.subtype === 'departure') j.dep = e as TransportDepartureEvent;
-    else j.arr = e as TransportArrivalEvent;
-    transportJourneys.set(e.journeyId, j);
-  }
-
-  function getMissingCounterpart(e: TimelineEvent): 'arrival' | 'departure' | null {
-    if (e.type !== 'otherTransportation') return null;
-    // No journeyId → was created/corrected manually without a counterpart
-    if (!e.journeyId) return e.subtype === 'departure' ? 'arrival' : 'departure';
-    const j = transportJourneys.get(e.journeyId);
-    if (!j) return null;
-    if (e.subtype === 'departure' && !j.arr) return 'arrival';
-    if (e.subtype === 'arrival' && !j.dep) return 'departure';
-    return null;
   }
 
   async function handleAddCounterpart(e: TransportDepartureEvent | TransportArrivalEvent) {
@@ -210,12 +180,7 @@ export function TimelineTab({ tripId, timeline, activities, isOwner }: Props) {
     // so the new counterpart will be linked to it.
     if (!journeyId) {
       journeyId = nanoid();
-      await fetch(`/api/trips/${tripId}/timeline/${e.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...e, journeyId }),
-      });
-      router.refresh();
+      await saveTimelineEvent.mutateAsync({ ...e, journeyId });
     }
 
     setCounterpartPrefill({
@@ -228,44 +193,6 @@ export function TimelineTab({ tripId, timeline, activities, isOwner }: Props) {
       journeyId,
     });
   }
-
-  // Group non-expense timeline events by date
-  const byDate = new Map<string, TimelineEvent[]>();
-  for (const e of timeline) {
-    if (e.type === 'expense') continue;
-    const day = e.date;
-    if (!byDate.has(day)) byDate.set(day, []);
-    byDate.get(day)!.push(e);
-  }
-
-  // Merge scheduled saved activities into the same date buckets.
-  // Skip activities that are linked to a timeline event — those are
-  // absorbed into the ActivityEventCard and should not appear separately.
-  const linkedActivityIds = new Set(
-    timeline
-      .filter((e): e is ActivityEvent => e.type === 'activity')
-      .map((e) => e.linkedActivityId)
-      .filter((id): id is string => !!id),
-  );
-  const scheduledActivities = activities.filter(
-    (a) => a.saved && a.scheduledDate && !linkedActivityIds.has(a.id),
-  );
-  const activitiesByDate = new Map<string, Activity[]>();
-  for (const a of scheduledActivities) {
-    const day = a.scheduledDate!;
-    if (!activitiesByDate.has(day)) activitiesByDate.set(day, []);
-    activitiesByDate.get(day)!.push(a);
-  }
-
-  // Build the union of all dates
-  const allDates = new Set([...byDate.keys(), ...activitiesByDate.keys()]);
-  const days = [...allDates].sort();
-
-  // Unlinked items eligible for DnD merging
-  const unlinkedActivityEvents = timeline.filter(
-    (e): e is ActivityEvent => e.type === 'activity' && !e.linkedActivityId,
-  );
-  const unlinkedActivities = scheduledActivities.filter((a) => !a.linkedEventId);
 
   return (
     <div className="space-y-4">
@@ -292,18 +219,6 @@ export function TimelineTab({ tripId, timeline, activities, isOwner }: Props) {
           type EventItem = { kind: 'event'; data: TimelineEvent; sortMs: number };
           type ActivityItem = { kind: 'activity'; data: Activity; sortMs: number };
           type MergedItem = EventItem | ActivityItem;
-
-          function eventSortMs(e: TimelineEvent): number {
-            if (e.utcISO) return new Date(e.utcISO).getTime();
-            if (e.date && e.time) return new Date(`${e.date}T${e.time}`).getTime();
-            if (e.date) return new Date(`${e.date}T23:59:59`).getTime();
-            return Number.MAX_SAFE_INTEGER;
-          }
-          function activitySortMs(a: Activity): number {
-            if (a.scheduledDate && a.scheduledTime) return new Date(`${a.scheduledDate}T${a.scheduledTime}`).getTime();
-            if (a.scheduledDate) return new Date(`${a.scheduledDate}T23:59:59`).getTime();
-            return Number.MAX_SAFE_INTEGER;
-          }
 
           const merged: MergedItem[] = [
             ...events.map((e) => ({ kind: 'event' as const, data: e, sortMs: eventSortMs(e) })),
@@ -497,7 +412,7 @@ export function TimelineTab({ tripId, timeline, activities, isOwner }: Props) {
           tripId={tripId}
           open={addOpen}
           onClose={() => setAddOpen(false)}
-          onSaved={() => router.refresh()}
+          onSaved={() => queryClient.invalidateQueries({ queryKey: tripKeys.timeline(tripId) })}
         />
       )}
       {editing && (
@@ -505,7 +420,7 @@ export function TimelineTab({ tripId, timeline, activities, isOwner }: Props) {
           tripId={tripId}
           open={!!editing}
           onClose={() => setEditing(null)}
-          onSaved={() => router.refresh()}
+          onSaved={() => queryClient.invalidateQueries({ queryKey: tripKeys.timeline(tripId) })}
           editing={editing}
         />
       )}
@@ -514,7 +429,7 @@ export function TimelineTab({ tripId, timeline, activities, isOwner }: Props) {
           tripId={tripId}
           open={!!counterpartPrefill}
           onClose={() => setCounterpartPrefill(null)}
-          onSaved={() => { router.refresh(); setCounterpartPrefill(null); }}
+          onSaved={() => { queryClient.invalidateQueries({ queryKey: tripKeys.timeline(tripId) }); setCounterpartPrefill(null); }}
           transportPrefill={counterpartPrefill}
         />
       )}

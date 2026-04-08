@@ -1,23 +1,30 @@
-import { auth } from '@/lib/auth';
-import { getTrip, updateTrip, deleteTrip } from '@/services/db';
+import { withTripAuth } from '@/lib/api';
+import { updateTrip, deleteTrip } from '@/services/db';
+import type { BudgetItemCategory } from '@/types';
 
-async function getUserId(): Promise<string | null> {
-  const session = await auth();
-  return (session as { userId?: string })?.userId ?? null;
-}
+export const GET = withTripAuth(async ({ trip }) => {
+  return Response.json({
+    data: {
+      id: trip.id,
+      name: trip.name,
+      destination: trip.destination,
+      destinations: trip.destinations,
+      startDate: trip.startDate,
+      endDate: trip.endDate,
+      status: trip.status,
+      coverEmoji: trip.coverEmoji,
+      coverPhotoUrl: trip.coverPhotoUrl,
+      itineraryMd: trip.itineraryMd,
+      notes: trip.notes,
+      budgetGoal: trip.budgetGoal,
+      categoryGoals: (trip.categoryGoals ?? null) as Partial<Record<BudgetItemCategory, number>> | null,
+      preferredCurrency: trip.preferredCurrency,
+    },
+  });
+});
 
-export async function PATCH(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { id } = await params;
-  const userId = await getUserId();
-  if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const trip = await getTrip(id, userId);
-  if (!trip) return Response.json({ error: 'Not found' }, { status: 404 });
-  if (trip.userId !== userId) return Response.json({ error: 'Forbidden' }, { status: 403 });
-
+export const PATCH = withTripAuth(async ({ userId, params, request }) => {
+  const { id } = params;
   const body = (await request.json()) as {
     name?: string;
     destination?: string;
@@ -36,21 +43,11 @@ export async function PATCH(
     endDate: body.endDate || undefined,
   };
   const updated = await updateTrip(id, userId, updateData);
-  return Response.json({ trip: updated });
-}
+  return Response.json({ data: updated });
+}, { requireOwner: true });
 
-export async function DELETE(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { id } = await params;
-  const userId = await getUserId();
-  if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const trip = await getTrip(id, userId);
-  if (!trip) return Response.json({ error: 'Not found' }, { status: 404 });
-  if (trip.userId !== userId) return Response.json({ error: 'Forbidden' }, { status: 403 });
-
+export const DELETE = withTripAuth(async ({ userId, params }) => {
+  const { id } = params;
   await deleteTrip(id, userId);
   return Response.json({ ok: true });
-}
+}, { requireOwner: true });

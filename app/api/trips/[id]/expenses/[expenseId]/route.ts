@@ -1,26 +1,10 @@
-import { auth } from '@/lib/auth';
-import { getTrip, loadTimeline, saveTimeline } from '@/services/db';
-import { makeCost } from '@/services/timeline';
-import { fetchRatesFromPreferred } from '@/services/currency';
+import { withTripAuth, apiError } from '@/lib/api';
+import { loadTimeline, saveTimeline } from '@/services/db';
+import { makeCost, fetchRatesFromPreferred } from '@/services/currency';
 import type { Cost, ExpenseEvent, TimelineEvent } from '@/types';
 
-async function getUserId(): Promise<string | null> {
-  const session = await auth();
-  return (session as { userId?: string })?.userId ?? null;
-}
-
-export async function PUT(
-  request: Request,
-  { params }: { params: Promise<{ id: string; expenseId: string }> },
-) {
-  const { id, expenseId } = await params;
-  const userId = await getUserId();
-  if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const trip = await getTrip(id, userId);
-  if (!trip) return Response.json({ error: 'Not found' }, { status: 404 });
-  if (trip.userId !== userId) return Response.json({ error: 'Forbidden' }, { status: 403 });
-
+export const PUT = withTripAuth(async ({ params, request }) => {
+  const { id, expenseId } = params;
   const body = (await request.json()) as Partial<{
     description: string;
     vendor: string;
@@ -35,7 +19,7 @@ export async function PUT(
 
   const timeline = await loadTimeline(id);
   const idx = timeline.findIndex((e) => e.id === expenseId && e.type === 'expense');
-  if (idx === -1) return Response.json({ error: 'Expense not found' }, { status: 404 });
+  if (idx === -1) return apiError('Expense not found', 404);
 
   const existing = timeline[idx] as ExpenseEvent;
 
@@ -68,27 +52,17 @@ export async function PUT(
   timeline.sort((a, b) => (a.date ?? '').localeCompare(b.date ?? ''));
   await saveTimeline(id, timeline);
 
-  return Response.json({ expense: updated });
-}
+  return Response.json({ data: updated });
+}, { requireOwner: true });
 
-export async function DELETE(
-  _request: Request,
-  { params }: { params: Promise<{ id: string; expenseId: string }> },
-) {
-  const { id, expenseId } = await params;
-  const userId = await getUserId();
-  if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const trip = await getTrip(id, userId);
-  if (!trip) return Response.json({ error: 'Not found' }, { status: 404 });
-  if (trip.userId !== userId) return Response.json({ error: 'Forbidden' }, { status: 403 });
-
+export const DELETE = withTripAuth(async ({ params }) => {
+  const { id, expenseId } = params;
   const timeline = await loadTimeline(id);
   const filtered = timeline.filter((e) => !(e.id === expenseId && e.type === 'expense'));
   if (filtered.length === timeline.length) {
-    return Response.json({ error: 'Expense not found' }, { status: 404 });
+    return apiError('Expense not found', 404);
   }
   await saveTimeline(id, filtered);
 
   return Response.json({ ok: true });
-}
+}, { requireOwner: true });

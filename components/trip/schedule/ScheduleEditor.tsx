@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
+import { tripKeys } from '@/lib/query-keys';
 import {
   DndContext,
   PointerSensor,
@@ -37,7 +38,7 @@ export function ScheduleEditor({
   initialActivities,
   returnDayIndex,
 }: Props) {
-  const router = useRouter();
+  const queryClient = useQueryClient();
   const [view, setView] = useState<ScheduleView>(initialView);
   const [centerDate, setCenterDate] = useState(initialDate);
   const [activities, setActivities] = useState<Activity[]>(initialActivities);
@@ -68,12 +69,12 @@ export function ScheduleEditor({
       setActivities((prev) => prev.filter((a) => a.id !== id));
       try {
         await fetch(`/api/trips/${tripId}/activities/${id}`, { method: 'DELETE' });
-        router.refresh();
+        queryClient.invalidateQueries({ queryKey: tripKeys.activities(tripId) });
       } catch {
         setActivities(initialActivities);
       }
     },
-    [tripId, initialActivities, router],
+    [tripId, initialActivities, queryClient],
   );
 
   // Optimistic activity update + server sync
@@ -90,13 +91,13 @@ export function ScheduleEditor({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(patch),
         });
-        router.refresh();
+        queryClient.invalidateQueries({ queryKey: tripKeys.activities(tripId) });
       } catch {
         // On failure, roll back
         setActivities(initialActivities);
       }
     },
-    [tripId, initialActivities, router],
+    [tripId, initialActivities, queryClient],
   );
 
   const {

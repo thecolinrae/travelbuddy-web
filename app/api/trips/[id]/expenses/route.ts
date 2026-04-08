@@ -1,26 +1,10 @@
-import { auth } from '@/lib/auth';
-import { getTrip, loadTimeline, saveTimeline } from '@/services/db';
-import { makeCost } from '@/services/timeline';
-import { fetchRatesFromPreferred } from '@/services/currency';
+import { withTripAuth } from '@/lib/api';
+import { loadTimeline, saveTimeline } from '@/services/db';
+import { makeCost, fetchRatesFromPreferred } from '@/services/currency';
 import type { Cost, ExpenseEvent } from '@/types';
 
-async function getUserId(): Promise<string | null> {
-  const session = await auth();
-  return (session as { userId?: string })?.userId ?? null;
-}
-
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { id } = await params;
-  const userId = await getUserId();
-  if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const trip = await getTrip(id, userId);
-  if (!trip) return Response.json({ error: 'Not found' }, { status: 404 });
-  if (trip.userId !== userId) return Response.json({ error: 'Forbidden' }, { status: 403 });
-
+export const POST = withTripAuth(async ({ params, request }) => {
+  const { id } = params;
   const body = (await request.json()) as {
     description: string;
     vendor?: string;
@@ -65,5 +49,5 @@ export async function POST(
   timeline.sort((a, b) => (a.date ?? '').localeCompare(b.date ?? ''));
   await saveTimeline(id, timeline);
 
-  return Response.json({ expense });
-}
+  return Response.json({ data: expense });
+}, { requireOwner: true });

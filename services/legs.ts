@@ -7,7 +7,7 @@
  */
 
 import { prisma } from '@/lib/prisma';
-import { airportsMatch } from './timeline';
+import { airportsMatch } from './timeline/utils';
 import type { TimelineEvent, TransportLeg } from '@/types';
 
 // ─── Name generation ──────────────────────────────────────────────────────────

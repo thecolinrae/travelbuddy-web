@@ -25,7 +25,7 @@ export async function GET() {
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
-  return Response.json({ notifications, unreadCount });
+  return Response.json({ data: notifications, unreadCount });
 }
 
 export async function PATCH() {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useUpdateTrip } from '@/hooks/use-trip-mutations';
 import Image from 'next/image';
 import { Check, ImageOff, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -33,7 +33,7 @@ interface Props {
 const NO_PHOTO = '__none__';
 
 export function TripEditModal({ tripId, open, onClose, initial }: Props) {
-  const router = useRouter();
+  const updateTrip = useUpdateTrip(tripId);
   const [name, setName] = useState(initial.name);
   const [coverEmoji, setCoverEmoji] = useState(initial.coverEmoji);
   const [destination, setDestination] = useState(initial.destination);
@@ -63,19 +63,14 @@ export function TripEditModal({ tripId, open, onClose, initial }: Props) {
   async function handleSave() {
     setSaving(true);
     try {
-      await fetch(`/api/trips/${tripId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: name.trim(),
-          coverEmoji: coverEmoji.trim() || '✈️',
-          coverPhotoUrl: selectedPhoto === NO_PHOTO ? null : selectedPhoto,
-          destination: destination.trim(),
-          startDate: startDate || null,
-          endDate: endDate || null,
-        }),
+      await updateTrip.mutateAsync({
+        name: name.trim(),
+        coverEmoji: coverEmoji.trim() || '✈️',
+        coverPhotoUrl: selectedPhoto === NO_PHOTO ? null : selectedPhoto,
+        destination: destination.trim(),
+        startDate: startDate || null,
+        endDate: endDate || null,
       });
-      router.refresh();
       onClose();
     } finally {
       setSaving(false);

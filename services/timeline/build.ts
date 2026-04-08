@@ -1,15 +1,19 @@
-/**
- * Timeline builder.
- *
- * Converts ParsedArtifacts into a typed, discriminated-union list of
- * TimelineEvents sorted chronologically.  Expenses become first-class
- * events in timeline.json; budget.json keeps only goal data.
- *
- * The formatted timeline is sent to Claude Sonnet for itinerary generation.
- */
-
-import { nanoid } from './nanoid';
-import { resolveTimezone, localToUtcISO } from './timezone';
+import { nanoid } from '../nanoid';
+import { resolveTimezone } from '../timezone';
+import { makeCost } from '../currency';
+import {
+  stripAirportCode,
+  inferCityFromHotelName,
+  extractAirportCode,
+  airportsMatch,
+} from './utils';
+import {
+  normalizeEvent,
+  utcForEvent,
+  eventSortKey,
+  resolveDeparture,
+  resolveArrival,
+} from './normalize';
 import type {
   ParsedArtifact,
   Passenger,
@@ -24,272 +28,8 @@ import type {
   TransportArrivalEvent,
   ExpenseEvent,
   ActivityEvent,
-  BudgetItemCategory,
   TransportType,
 } from '@/types';
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-/** Strip trailing airport codes like "(YYZ)", "(LHR)", "(EGLL)". */
-function stripAirportCode(s: string): string {
-  return s.replace(/\s*\([A-Z]{3,4}\)\s*$/, '').trim();
-}
-
-/**
- * Normalize a display location string to Title Case if it looks like ALL CAPS.
- * Leaves already-mixed-case strings (e.g. "New York", "São Paulo") untouched.
- * Short all-caps strings that look like airport/country codes (≤4 chars) are
- * also left alone so "YYZ" or "NRT" aren't converted to "Yyz".
- */
-function normalizeLocation(s: string): string {
-  if (!s) return s;
-  const letters = s.replace(/[^a-zA-Z]/g, '');
-  if (letters.length <= 4) return s; // likely a code — leave as-is
-  const upperRatio = letters.replace(/[^A-Z]/g, '').length / letters.length;
-  if (upperRatio < 0.8) return s; // already mixed case
-  return s
-    .toLowerCase()
-    .replace(/(^|[\s\-\/])(\p{L})/gu, (_, sep, c) => sep + c.toUpperCase());
-}
-
-/** Extract an IATA/ICAO code from strings like "Toronto (YYZ)" → "YYZ". */
-function extractAirportCode(s: string): string | null {
-  return s.match(/\(([A-Z]{3,4})\)\s*$/)?.[1] ?? null;
-}
-
-/**
- * True if two airport/location strings refer to the same airport.
- * Compares by code when both have one; falls back to city-name comparison.
- */
-export function airportsMatch(a: string, b: string): boolean {
-  if (!a || !b) return false;
-  const cA = extractAirportCode(a);
-  const cB = extractAirportCode(b);
-  if (cA && cB) return cA === cB;
-  return stripAirportCode(a).toLowerCase() === stripAirportCode(b).toLowerCase();
-}
-
-/**
- * Try to extract a city name from a hotel name when the destination field is missing.
- * Handles common patterns:
- *   "Marriott Tokyo"            → "Tokyo"
- *   "The Langham, Shanghai"     → "Shanghai"
- *   "Westin Paris – Vendôme"    → "Paris"
- *   "Hilton London Kensington"  → "London"
- */
-function inferCityFromHotelName(name: string): string {
-  if (!name) return '';
-  // "Mandarin Oriental, Bangkok" — take everything after the comma
-  const commaIdx = name.indexOf(',');
-  if (commaIdx !== -1) {
-    const afterComma = name.slice(commaIdx + 1).split(/[–—-]/)[0].trim();
-    if (afterComma && afterComma.length < 30 && !/\d/.test(afterComma)) return afterComma;
-  }
-  // Strip chain names and generic hotel words, then return the first remaining proper noun
-  const stripped = name
-    .replace(/\b(marriott|hilton|hyatt|sheraton|westin|intercontinental|fairmont|ritz[- ]?carlton|four seasons|mandarin oriental|peninsula|sofitel|novotel|ibis|pullman|doubletree|courtyard|hampton inn|holiday inn|crowne plaza|radisson blu|aloft|w hotel|le méridien)\b/gi, '')
-    .replace(/\b(hotel|the|grand|royal|palace|towers?|suites?|boutique|resort|collection|autograph|tribute|express|inn|spa|by|at|of|and|le|la|les|de|du)\b/gi, '')
-    .replace(/[–—]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  const words = stripped.split(' ').filter((w) => /^[A-Z][a-zA-ZÀ-ÿ]{1,}$/.test(w) && w.length > 2);
-  return words[0] ?? '';
-}
-
-/** Build a Cost object, computing preferred amount if rates are provided. */
-export function makeCost(
-  localAmount: number,
-  localCurrency: string,
-  preferredCurrency: string,
-  rates: Record<string, number>,
-): Cost {
-  if (localCurrency === preferredCurrency) {
-    return { amountPreferredCurrency: localAmount, preferredCurrency };
-  }
-  const rate = rates[localCurrency] ?? 1;
-  const amountPreferredCurrency = Math.round((localAmount / rate) * 100) / 100;
-  return {
-    amountPreferredCurrency,
-    preferredCurrency,
-    amountLocalCurrency: localAmount,
-    localCurrency,
-    conversionRate: rate,
-  };
-}
-
-// ─── UTC normalisation ────────────────────────────────────────────────────────
-
-/**
- * Normalize a timeline event's UTC timestamp and timezone.
- *
- * For transport events (flights and other transport) the local time shown to the
- * user is the authoritative value — it's what's printed on the ticket.  We
- * therefore compute utcISO *from* the local date+time using a timezone resolved
- * from the relevant location:
- *   • departure events  → timezone of the departure airport / city
- *   • arrival events    → timezone of the arrival airport / city
- *
- * This is more reliable than trusting UTC values provided by an LLM, which
- * frequently gets offsets wrong for international flights.
- *
- * For all other event types (hotels, activities, etc.) that already have both
- * utcISO and timezone stored, we re-derive local date+time from UTC to keep
- * them consistent.
- */
-function normalizeEvent<T extends TimelineEvent>(e: T): T {
-  // Normalize display location strings to Title Case (handles ALL CAPS from LLM output)
-  const withNormalizedCity = e.locationCity
-    ? { ...e, locationCity: normalizeLocation(e.locationCity) }
-    : e;
-  const withNormalizedLocations: T =
-    withNormalizedCity.type === 'otherTransportation'
-      ? {
-          ...withNormalizedCity,
-          departureLocation: normalizeLocation(withNormalizedCity.departureLocation),
-          arrivalLocation: normalizeLocation(withNormalizedCity.arrivalLocation),
-        } as T
-      : withNormalizedCity as T;
-  const normalized = withNormalizedLocations;
-
-  if (normalized.type === 'flight' && (normalized.subtype === 'departure' || normalized.subtype === 'arrival')) {
-    const depApt = normalizeLocation(normalized.departureAirport);
-    const arrApt = normalizeLocation(normalized.arrivalAirport);
-    const withNormalizedAirports = { ...normalized, departureAirport: depApt, arrivalAirport: arrApt } as typeof normalized;
-    const locationStr = normalized.subtype === 'departure' ? depApt : arrApt;
-    const tz = resolveTimezone(locationStr) ?? withNormalizedAirports.timezone ?? undefined;
-    if (tz && withNormalizedAirports.date && withNormalizedAirports.time) {
-      const computed = utcForEvent(withNormalizedAirports.date, withNormalizedAirports.time, tz);
-      if (computed) return { ...withNormalizedAirports, utcISO: computed, timezone: tz } as T;
-    }
-    if (tz && !withNormalizedAirports.timezone) return { ...withNormalizedAirports, timezone: tz } as T;
-    return withNormalizedAirports as T;
-  }
-
-  if (normalized.type === 'otherTransportation') {
-    const locationStr = normalized.subtype === 'departure' ? normalized.departureLocation : normalized.arrivalLocation;
-    const tz = resolveTimezone(locationStr) ?? normalized.timezone ?? undefined;
-    if (tz && normalized.date && normalized.time) {
-      const computed = utcForEvent(normalized.date, normalized.time, tz);
-      if (computed) return { ...normalized, utcISO: computed, timezone: tz } as T;
-    }
-    if (tz && !normalized.timezone) return { ...normalized, timezone: tz } as T;
-    return normalized;
-  }
-
-  // For all other event types (hotel, activity, expense): compute utcISO from
-  // local date+time+timezone. Local time is always authoritative — never
-  // re-derive local time from a stored utcISO.
-  const tz = normalized.timezone;
-  if (tz && normalized.date && normalized.time) {
-    const computed = utcForEvent(normalized.date, normalized.time, tz);
-    if (computed) return { ...normalized, utcISO: computed } as T;
-  }
-  return normalized;
-}
-
-/**
- * Compute utcISO from a local date + time + IANA timezone.
- * Returns undefined when any field is missing so events without a time stay utcISO-free.
- */
-function utcForEvent(
-  date: string | undefined,
-  time: string | undefined,
-  tz: string | null | undefined,
-): string | undefined {
-  if (!date || !time || !tz) return undefined;
-  return localToUtcISO(date, time, tz);
-}
-
-/**
- * Advance a YYYY-MM-DD date string by one calendar day (UTC-safe).
- */
-function bumpDay(dateStr: string): string {
-  const d = new Date(dateStr + 'T12:00:00Z');
-  d.setUTCDate(d.getUTCDate() + 1);
-  return d.toISOString().slice(0, 10);
-}
-
-/**
- * Given the previous leg's arrival UTC and a candidate departure local date+time+tz,
- * return the corrected [depDate, depUtcISO] pair.
- *
- * Within a single booking, consecutive legs should connect within ≤24 h.  If the
- * computed gap exceeds 24 h, the LLM has most likely used the wrong timezone's
- * calendar date (common for dateline-crossing itineraries).  Pull the date back
- * by one day and recompute.
- */
-function resolveDeparture(
-  depDate: string,
-  depTime: string | undefined,
-  depTz: string | undefined,
-  prevArrUtcISO: string | undefined,
-): { date: string; utcISO: string | undefined } {
-  let date = depDate;
-  let utcISO = utcForEvent(date, depTime, depTz);
-  if (prevArrUtcISO && utcISO) {
-    const gapMs = new Date(utcISO).getTime() - new Date(prevArrUtcISO).getTime();
-    const MIN_CORRECTION_MS = 24 * 60 * 60 * 1000; // 24 h — only correct within this window
-    const MAX_CORRECTION_MS = 48 * 60 * 60 * 1000; // 48 h — ignore intentional multi-day stays
-    if (gapMs > MIN_CORRECTION_MS && gapMs <= MAX_CORRECTION_MS) {
-      // Try pulling back one day
-      const d = new Date(date + 'T12:00:00Z');
-      d.setUTCDate(d.getUTCDate() - 1);
-      const earlier = d.toISOString().slice(0, 10);
-      const earlierUtc = utcForEvent(earlier, depTime, depTz);
-      if (earlierUtc && earlierUtc >= prevArrUtcISO) {
-        // The earlier date still departs after the previous arrival — use it
-        date = earlier;
-        utcISO = earlierUtc;
-      }
-    }
-  }
-  return { date, utcISO };
-}
-
-/**
- * Given a departure UTC ISO and a candidate arrival local date+time+tz, return
- * the corrected [arrDate, arrUtcISO] pair.
- *
- * For dateline-crossing flights the LLM sometimes provides an arrival date that
- * is one (or two) days too early, making the computed arrUtcISO fall before the
- * depUtcISO — physically impossible.  We bump the arrival date forward by one
- * day at a time (up to 3 attempts) until the UTC ordering is valid.
- */
-function resolveArrival(
-  arrDate: string,
-  arrTime: string | undefined,
-  arrTz: string | undefined,
-  depUtcISO: string | undefined,
-): { date: string; utcISO: string | undefined } {
-  let date = arrDate;
-  let utcISO = utcForEvent(date, arrTime, arrTz);
-  if (depUtcISO && utcISO) {
-    // Arrival before departure — bump forward (dateline crossing etc.)
-    for (let i = 0; i < 3 && utcISO < depUtcISO; i++) {
-      date = bumpDay(date);
-      utcISO = utcForEvent(date, arrTime, arrTz) ?? utcISO;
-    }
-    // Arrival too far in the future (24–48h gap) — try pulling back one day
-    const gapMs = new Date(utcISO).getTime() - new Date(depUtcISO).getTime();
-    if (gapMs > 24 * 60 * 60 * 1000 && gapMs <= 48 * 60 * 60 * 1000) {
-      const d = new Date(date + 'T12:00:00Z');
-      d.setUTCDate(d.getUTCDate() - 1);
-      const earlier = d.toISOString().slice(0, 10);
-      const earlierUtc = utcForEvent(earlier, arrTime, arrTz);
-      if (earlierUtc && earlierUtc >= depUtcISO) {
-        date = earlier;
-        utcISO = earlierUtc;
-      }
-    }
-  }
-  return { date, utcISO };
-}
-
-// ─── Sort key ────────────────────────────────────────────────────────────────
-
-export function eventSortKey(e: TimelineEvent): string {
-  return e.utcISO ?? `${e.date}T${e.time ?? '00:00'}`;
-}
 
 // ─── Deduplication key per event type ────────────────────────────────────────
 
@@ -1103,74 +843,6 @@ export function mergeTimelines(existing: TimelineEvent[], incoming: TimelineEven
   return deduplicateTimeline([...existing, ...incoming]);
 }
 
-/**
- * Return all expense events from a timeline (for Expenses/Budget views).
- */
-export function getTimelineExpenses(events: TimelineEvent[]): ExpenseEvent[] {
-  return events.filter((e): e is ExpenseEvent => e.type === 'expense');
-}
-
-/**
- * Map an expense event's open category string to a BudgetItemCategory for display.
- */
-export function normalizeBudgetCategory(category: string): BudgetItemCategory {
-  const map: Record<string, BudgetItemCategory> = {
-    flights: 'flights',
-    flight: 'flights',
-    airlines: 'flights',
-    airline: 'flights',
-    hotels: 'hotels',
-    hotel: 'hotels',
-    lodging: 'hotels',
-    accommodation: 'hotels',
-    car_rental: 'car_rental',
-    'car rental': 'car_rental',
-    rental: 'car_rental',
-    activities: 'activities',
-    activity: 'activities',
-    tours: 'activities',
-    entertainment: 'activities',
-    transport: 'transport',
-    transportation: 'transport',
-    transit: 'transport',
-    taxi: 'transport',
-    bus: 'transport',
-    train: 'transport',
-    ferry: 'transport',
-    rideshare: 'transport',
-    food: 'food',
-    dining: 'food',
-    restaurant: 'food',
-    grocery: 'food',
-    insurance: 'insurance',
-  };
-  return map[category.toLowerCase()] ?? 'other';
-}
-
-/**
- * Extract distinct destination cities visited from a timeline.
- * Hotels and activities are most reliable; falls back to flight arrivals.
- */
-export function extractDestinationsFromTimeline(events: TimelineEvent[]): string[] {
-  const confirmed = new Set<string>();
-  const arrivals = new Set<string>();
-
-  for (const e of events) {
-    const city = e.locationCity;
-    if (!city) continue;
-    if (e.type === 'hotel' && e.subtype === 'check_in') {
-      confirmed.add(city);
-    } else if (e.type === 'activity') {
-      confirmed.add(city);
-    } else if (e.type === 'flight' && e.subtype === 'arrival') {
-      arrivals.add(stripAirportCode(city) || city);
-    }
-  }
-
-  const result = confirmed.size > 0 ? [...confirmed] : [...arrivals];
-  return result.filter(Boolean);
-}
-
 // ─── Connection event migration ───────────────────────────────────────────────
 
 /**
@@ -1364,23 +1036,24 @@ export function migrateTimeline(raw: unknown[]): TimelineEvent[] {
           events.push({
             id: nanoid(),
             type: 'expense',
-            date: rawEvent.date,
-            time: rawEvent.time,
-            utcISO: rawEvent.utcDateTime,
-            locationCity: stripAirportCode(depAirport) || city,
-            description: rawEvent.headline,
+            date: dep.date,
+            locationCity: dep.locationCity,
+            description: `Flight ${dep.flightNo}`,
             category: 'flights',
             cost: legacyCost(rawEvent.amount, rawEvent.currency ?? 'CAD'),
+            linkedEventId: dep.id,
             artifactSources: src ? [src] : undefined,
-          });
+          } as ExpenseEvent);
         }
         break;
       }
 
       case 'arrival': {
-        const match = rawEvent.headline.match(/^Arrives\s+(.+?)(?:\s+\(([A-Z0-9]+)\))?$/);
-        const arrAirport = rawEvent.city ?? match?.[1] ?? rawEvent.headline;
-        const arr: FlightArrivalEvent = {
+        const match = rawEvent.headline.match(/^([A-Z]{2}\d+):\s*(.+?)\s*→\s*(.+)$/);
+        const flightNo = match?.[1] ?? rawEvent.headline;
+        const depAirport = match?.[2] ?? '';
+        const arrAirport = match?.[3] ?? rawEvent.city ?? rawEvent.headline;
+        events.push({
           id: nanoid(),
           type: 'flight',
           subtype: 'arrival',
@@ -1388,146 +1061,120 @@ export function migrateTimeline(raw: unknown[]): TimelineEvent[] {
           time: rawEvent.time,
           utcISO: rawEvent.utcDateTime,
           locationCity: stripAirportCode(arrAirport) || city,
-          flightNo: '',
-          departureAirport: '',
+          flightNo,
+          departureAirport: depAirport,
           arrivalAirport: arrAirport,
           artifactSources: src ? [src] : undefined,
-        };
-        events.push(arr);
+        } as FlightArrivalEvent);
         break;
       }
 
-      case 'check_in': {
-        const hotelName = rawEvent.headline.replace(/^Check in:\s*/i, '').trim();
-        const checkIn: HotelCheckInEvent = {
+      case 'hotel_checkin': {
+        const hi: HotelCheckInEvent = {
           id: nanoid(),
           type: 'hotel',
           subtype: 'check_in',
           date: rawEvent.date,
           time: rawEvent.time,
+          utcISO: rawEvent.utcDateTime,
           locationCity: city,
-          hotelName,
-          checkoutDate: rawEvent.date, // unknown, use same date as fallback
+          hotelName: rawEvent.headline,
+          checkoutDate: rawEvent.date, // unknown checkout
           breakfastIncluded: false,
           amenities: [],
           artifactSources: src ? [src] : undefined,
         };
-        events.push(checkIn);
+        events.push(hi);
         if (rawEvent.amount && rawEvent.amount > 0) {
           events.push({
             id: nanoid(),
             type: 'expense',
-            date: rawEvent.date,
-            locationCity: city,
-            description: hotelName,
+            date: hi.date,
+            locationCity: hi.locationCity,
+            description: hi.hotelName,
             category: 'hotels',
             cost: legacyCost(rawEvent.amount, rawEvent.currency ?? 'CAD'),
+            linkedEventId: hi.id,
             artifactSources: src ? [src] : undefined,
-          });
+          } as ExpenseEvent);
         }
         break;
       }
 
-      case 'check_out': {
-        const hotelName = rawEvent.headline.replace(/^Check out:\s*/i, '').trim();
+      case 'hotel_checkout': {
         events.push({
           id: nanoid(),
           type: 'hotel',
           subtype: 'check_out',
           date: rawEvent.date,
           time: rawEvent.time,
+          utcISO: rawEvent.utcDateTime,
           locationCity: city,
-          hotelName,
+          hotelName: rawEvent.headline,
           artifactSources: src ? [src] : undefined,
         } as HotelCheckOutEvent);
         break;
       }
 
-      case 'pickup': {
-        const dep: TransportDepartureEvent = {
-          id: nanoid(),
-          type: 'otherTransportation',
-          subtype: 'departure',
-          date: rawEvent.date,
-          time: rawEvent.time,
-          locationCity: city,
-          transportType: 'car_rental',
-          departureLocation: city || rawEvent.headline,
-          arrivalLocation: city,
-          notes: rawEvent.details,
-          artifactSources: src ? [src] : undefined,
-        };
-        events.push(dep);
-        if (rawEvent.amount && rawEvent.amount > 0) {
-          events.push({
+      case 'car_pickup':
+      case 'car_dropoff': {
+        const isPickup = rawEvent.kind === 'car_pickup';
+        const match = rawEvent.headline.match(/(.+?)\s*→\s*(.+)/);
+        const depLoc = match?.[1] ?? city;
+        const arrLoc = match?.[2] ?? city;
+        if (isPickup) {
+          const dep: TransportDepartureEvent = {
             id: nanoid(),
-            type: 'expense',
-            date: rawEvent.date,
-            locationCity: city,
-            description: rawEvent.headline,
-            category: 'car_rental',
-            cost: legacyCost(rawEvent.amount, rawEvent.currency ?? 'CAD'),
-            artifactSources: src ? [src] : undefined,
-          } as ExpenseEvent);
-        }
-        break;
-      }
-
-      case 'dropoff': {
-        events.push({
-          id: nanoid(),
-          type: 'otherTransportation',
-          subtype: 'arrival',
-          date: rawEvent.date,
-          time: rawEvent.time,
-          locationCity: city || rawEvent.headline,
-          transportType: 'car_rental',
-          departureLocation: city,
-          arrivalLocation: city || rawEvent.headline,
-          artifactSources: src ? [src] : undefined,
-        } as TransportArrivalEvent);
-        break;
-      }
-
-      case 'activity': {
-        events.push({
-          id: nanoid(),
-          type: 'activity',
-          date: rawEvent.date,
-          time: rawEvent.time,
-          locationCity: city,
-          description: rawEvent.headline,
-          category: 'sightseeing',
-          cost: rawEvent.amount && rawEvent.amount > 0
-            ? legacyCost(rawEvent.amount, rawEvent.currency ?? 'CAD')
-            : undefined,
-          notes: rawEvent.details,
-          artifactSources: src ? [src] : undefined,
-        } as ActivityEvent);
-        if (rawEvent.amount && rawEvent.amount > 0) {
-          events.push({
-            id: nanoid(),
-            type: 'expense',
+            type: 'otherTransportation',
+            subtype: 'departure',
             date: rawEvent.date,
             time: rawEvent.time,
+            utcISO: rawEvent.utcDateTime,
             locationCity: city,
-            description: rawEvent.headline,
-            category: 'activities',
-            cost: legacyCost(rawEvent.amount, rawEvent.currency ?? 'CAD'),
+            transportType: 'car_rental',
+            departureLocation: depLoc,
+            arrivalLocation: arrLoc,
             artifactSources: src ? [src] : undefined,
-          } as ExpenseEvent);
+          };
+          events.push(dep);
+          if (rawEvent.amount && rawEvent.amount > 0) {
+            events.push({
+              id: nanoid(),
+              type: 'expense',
+              date: dep.date,
+              locationCity: dep.locationCity,
+              description: `Car rental`,
+              category: 'car_rental',
+              cost: legacyCost(rawEvent.amount, rawEvent.currency ?? 'CAD'),
+              linkedEventId: dep.id,
+              artifactSources: src ? [src] : undefined,
+            } as ExpenseEvent);
+          }
+        } else {
+          events.push({
+            id: nanoid(),
+            type: 'otherTransportation',
+            subtype: 'arrival',
+            date: rawEvent.date,
+            time: rawEvent.time,
+            utcISO: rawEvent.utcDateTime,
+            locationCity: city,
+            transportType: 'car_rental',
+            departureLocation: depLoc,
+            arrivalLocation: arrLoc,
+            artifactSources: src ? [src] : undefined,
+          } as TransportArrivalEvent);
         }
         break;
       }
 
       default: {
-        // 'other' — expense if has amount, activity otherwise
+        // Generic events → ActivityEvent; costs → ExpenseEvent
         if (rawEvent.amount && rawEvent.amount > 0) {
           events.push({
             id: nanoid(),
             type: 'expense',
             date: rawEvent.date,
-            time: rawEvent.time,
             locationCity: city,
             description: rawEvent.headline,
             category: 'other',
@@ -1535,12 +1182,13 @@ export function migrateTimeline(raw: unknown[]): TimelineEvent[] {
             notes: rawEvent.details,
             artifactSources: src ? [src] : undefined,
           } as ExpenseEvent);
-        } else if (rawEvent.date) {
+        } else {
           events.push({
             id: nanoid(),
             type: 'activity',
             date: rawEvent.date,
             time: rawEvent.time,
+            utcISO: rawEvent.utcDateTime,
             locationCity: city,
             description: rawEvent.headline,
             category: 'other',
@@ -1553,131 +1201,5 @@ export function migrateTimeline(raw: unknown[]): TimelineEvent[] {
     }
   }
 
-  return events
-    .map(normalizeEvent)
-    .sort((a, b) => eventSortKey(a).localeCompare(eventSortKey(b)));
-}
-
-// ─── Format timeline for Sonnet ───────────────────────────────────────────────
-
-/**
- * Render a TimelineEvent[] as human-readable text for Claude Sonnet itinerary generation.
- * Expense events are omitted (Sonnet doesn't include prices in itineraries).
- */
-export function formatTimeline(events: TimelineEvent[]): string {
-  const logisticsEvents = events.filter((e) => e.type !== 'expense');
-  if (logisticsEvents.length === 0) return '(No scheduled events found in this document.)';
-
-  const lines: string[] = [
-    'TRIP TIMELINE (chronological order by UTC when available):',
-    'NOTE: All times are LOCAL to the event location. Display exactly as given — never convert.',
-  ];
-
-  for (const e of logisticsEvents) {
-    const localWhen = e.time ? `${e.date} ${e.time} local` : `${e.date} (time unspecified)`;
-    const utcPart = e.utcISO ? ` [${e.utcISO}]` : '';
-    lines.push('');
-    lines.push(`${localWhen}${utcPart}`);
-
-    switch (e.type) {
-      case 'flight': {
-        if (e.subtype === 'connection') {
-          const ce = e as FlightConnectionEvent;
-          let layover = '';
-          if (ce.layoverMinutes) {
-            const h = Math.floor(ce.layoverMinutes / 60);
-            const m = ce.layoverMinutes % 60;
-            layover = `  (${h}h${m > 0 ? `${m}m` : ''} layover)`;
-          }
-          lines.push(`  🔄 CONNECTION STOP`);
-          lines.push(`  ${ce.connectionAirport}${layover}`);
-          lines.push(`  ${ce.inboundFromAirport} → [${ce.connectionAirport}] → ${ce.outboundToAirport}`);
-          if (ce.inboundFlightNo) lines.push(`  Inbound: ${ce.inboundFlightNo}`);
-          if (ce.time) lines.push(`  Arrives: ${ce.time} local`);
-          if (ce.outboundFlightNo) lines.push(`  Outbound: ${ce.outboundFlightNo}`);
-          if (ce.departureTime) lines.push(`  Departs: ${ce.departureTime} local`);
-          if (ce.requiresSecurity) lines.push(`  Security screening required`);
-          if (ce.requiresCustoms) lines.push(`  Customs/border control required`);
-          if (ce.bookingRef) lines.push(`  Ref: ${ce.bookingRef}`);
-        } else {
-          const label = e.subtype === 'departure' ? '✈️ FLIGHT DEPARTURE' : '🛬 FLIGHT ARRIVAL';
-          lines.push(`  ${label}`);
-          if (e.subtype === 'departure') {
-            lines.push(`  ${e.flightNo ? e.flightNo + ': ' : ''}${e.departureAirport} → ${e.arrivalAirport}`);
-            if (e.bookingRef) lines.push(`  Ref: ${e.bookingRef}`);
-            if (e.travelClass) lines.push(`  Class: ${e.travelClass}`);
-            if (e.seatNumber) lines.push(`  Seat: ${e.seatNumber}`);
-            if (e.boardingTime) lines.push(`  Boarding: ${e.boardingTime}`);
-            if (e.gate) lines.push(`  Gate: ${e.gate}`);
-            if (e.baggageAllowance) lines.push(`  Baggage: ${e.baggageAllowance}`);
-            if (e.loyaltyNo) lines.push(`  FF#: ${e.loyaltyNo}${e.loyaltyStatus ? ` (${e.loyaltyStatus})` : ''}`);
-            if (e.notes) lines.push(`  ${e.notes}`);
-          } else {
-            lines.push(`  ${e.flightNo ? e.flightNo + ' arrives ' : 'Arrives '}${e.arrivalAirport}`);
-          }
-          if (e.locationCity) lines.push(`  City: ${e.locationCity}`);
-        }
-        break;
-      }
-
-      case 'hotel': {
-        if (e.subtype === 'check_in') {
-          lines.push(`  🏨 HOTEL CHECK-IN`);
-          lines.push(`  ${e.hotelName}`);
-          if (e.locationCity) lines.push(`  City: ${e.locationCity}`);
-          if (e.bookingRef) lines.push(`  Ref: ${e.bookingRef}`);
-          if (e.roomType) lines.push(`  Room: ${e.roomType}`);
-          if (e.numberOfNights) lines.push(`  Nights: ${e.numberOfNights}`);
-          if (e.breakfastIncluded) lines.push(`  Breakfast: Included`);
-          if (e.amenities?.length) lines.push(`  Amenities: ${e.amenities.join(', ')}`);
-          if (e.loyaltyNumber) lines.push(`  Member#: ${e.loyaltyNumber}${e.loyaltyStatus ? ` (${e.loyaltyStatus})` : ''}`);
-          lines.push(`  Check-out: ${e.checkoutDate}${e.checkoutTime ? ' ' + e.checkoutTime : ''}`);
-        } else {
-          lines.push(`  🏨 HOTEL CHECK-OUT`);
-          lines.push(`  ${e.hotelName}`);
-          if (e.locationCity) lines.push(`  City: ${e.locationCity}`);
-        }
-        break;
-      }
-
-      case 'otherTransportation': {
-        const typeLabel = ({
-          car_rental: '🚗 CAR RENTAL',
-          bus: '🚌 BUS',
-          train: '🚆 TRAIN',
-          ferry: '⛴️ FERRY',
-          taxi: '🚕 TAXI',
-          rideshare: '🚕 RIDESHARE',
-          other: '🚌 TRANSPORT',
-        } as Record<TransportType, string>)[e.transportType] ?? '🚌 TRANSPORT';
-
-        if (e.subtype === 'departure') {
-          lines.push(`  ${typeLabel} PICKUP`);
-          lines.push(`  ${e.departureLocation} → ${e.arrivalLocation}`);
-          if (e.vendor) lines.push(`  Provider: ${e.vendor}`);
-          if (e.bookingRef) lines.push(`  Ref: ${e.bookingRef}`);
-          if (e.notes) lines.push(`  ${e.notes}`);
-        } else {
-          lines.push(`  ${typeLabel} RETURN/DROP-OFF`);
-          lines.push(`  ${e.arrivalLocation}`);
-          if (e.vendor) lines.push(`  Provider: ${e.vendor}`);
-        }
-        if (e.locationCity) lines.push(`  City: ${e.locationCity}`);
-        break;
-      }
-
-      case 'activity': {
-        lines.push(`  🎭 ACTIVITY`);
-        lines.push(`  ${e.description}`);
-        if (e.locationCity) lines.push(`  City: ${e.locationCity}`);
-        if (e.bookingRef) lines.push(`  Ref: ${e.bookingRef}`);
-        if (e.notes) lines.push(`  ${e.notes}`);
-        break;
-      }
-    }
-
-    e.artifactSources?.forEach((s) => lines.push(`  Source: ${s}`));
-  }
-
-  return lines.join('\n');
+  return events.sort((a, b) => eventSortKey(a).localeCompare(eventSortKey(b)));
 }
