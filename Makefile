@@ -12,7 +12,7 @@ studio:
 
 # Apply migrations to local DB
 migrate-dev:
-	docker compose exec web npx prisma@6 migrate dev
+	docker compose exec -u node web npx prisma@6 migrate dev
 
 # ── Production ────────────────────────────────────────────────────────────────
 
