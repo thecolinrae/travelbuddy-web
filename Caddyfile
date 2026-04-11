@@ -6,7 +6,7 @@ travelbuddy.screwball.ca {
     # Proxy MinIO presigned download URLs — must come before the catch-all
     handle /storage/* {
         uri strip_prefix /storage
-        reverse_proxy minio:9000
+        reverse_proxy storage:9000
     }
 
     reverse_proxy web:3000
