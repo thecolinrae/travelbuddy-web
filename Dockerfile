@@ -14,7 +14,7 @@ COPY . .
 RUN npx prisma generate
 
 # Build Next.js (standalone output)
-RUN npm run build
+RUN NODE_OPTIONS="--max-old-space-size=1536" npm run build
 
 # ── Stage 3: runner ───────────────────────────────────────────────────────────
 FROM node:20-alpine AS runner
