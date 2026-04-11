@@ -8,7 +8,7 @@ services:
       context: .
       target: runner       # use the optimized production stage
     command: node server.js
-    volumes: []            # no source mounts in production
+    volumes: !reset []     # no source mounts in production
     restart: unless-stopped
     ports: []              # Caddy handles external port 80/443; internal only
     environment:
