@@ -12,7 +12,7 @@ studio:
 
 # Apply migrations to local DB
 migrate-dev:
-	docker compose exec web npx prisma migrate dev
+	docker compose exec web npx prisma@6 migrate dev
 
 # ── Production ────────────────────────────────────────────────────────────────
 
@@ -34,7 +34,7 @@ logs:
 
 # Apply pending Prisma migrations in production
 migrate:
-	docker compose -f docker-compose.yml -f docker-compose.prod.yml exec web npx prisma migrate deploy
+	docker compose -f docker-compose.yml -f docker-compose.prod.yml exec web npx prisma@6 migrate deploy
 
 # ── Database utilities ────────────────────────────────────────────────────────
 
