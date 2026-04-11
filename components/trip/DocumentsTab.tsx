@@ -45,12 +45,9 @@ export function DocumentsTab({ artifacts, tripId, isOwner, labelSyncs }: Props) 
   async function handleDownload(artifact: ArtifactInfo) {
     setDownloading(artifact.id);
     try {
-      const res = await fetch(`/api/artifacts/${artifact.id}/url`);
-      const { url } = (await res.json()) as { url: string };
       const a = document.createElement('a');
-      a.href = url;
+      a.href = `/api/artifacts/${artifact.id}/download`;
       a.download = artifact.fileName;
-      a.target = '_blank';
       a.click();
     } finally {
       setDownloading(null);
