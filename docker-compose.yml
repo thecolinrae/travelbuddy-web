@@ -28,8 +28,6 @@ services:
       S3_SECRET_KEY: minioadmin
       S3_REGION: us-east-1
     depends_on:
-      db:
-        condition: service_healthy
       storage:
         condition: service_healthy
 
