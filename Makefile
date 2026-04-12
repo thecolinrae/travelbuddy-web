@@ -1,10 +1,14 @@
 .PHONY: dev build up down logs migrate migrate-dev studio backup-db shell-db
 
+# ── Prerequisites ──────────────────────────────────────────────────────────────
+# Production requires the shared infra stack to be running first:
+#   cd ~/Dev/homelab-infra && make up
+
 # ── Local development ──────────────────────────────────────────────────────────
 
 # Start local dev stack (Next.js + PostgreSQL + MinIO)
 dev:
-	docker compose up --build
+	docker compose --profile dev up --build
 
 # Run Prisma Studio against local DB
 studio:

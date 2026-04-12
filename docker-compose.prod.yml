@@ -1,49 +1,34 @@
 # ── Production overrides ───────────────────────────────────────────────────────
 # Usage: make up
 # Combines with docker-compose.yml: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Caddy lives in ~/Dev/homelab-infra — start that stack first.
+
+networks:
+  proxy:
+    name: homelab_proxy
+    external: true          # owned by homelab-infra
 
 services:
   web:
+    container_name: travelbuddy_web   # Caddy upstream: travelbuddy_web:3000
     build:
       context: .
-      target: runner       # use the optimized production stage
+      target: runner        # use the optimized production stage
       args:
         NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}
     command: node server.js
-    volumes: !reset []     # no source mounts in production
+    volumes: !reset []      # no source mounts in production
     restart: unless-stopped
-    ports: []              # Caddy handles external port 80/443; internal only
+    ports: []               # Caddy handles external traffic; no direct exposure
     environment:
       NODE_ENV: production
-
-  db:
-    ports: []              # don't expose PostgreSQL externally
-    restart: unless-stopped
+    networks:
+      default: {}           # can still reach storage on the app-local network
+      proxy: {}             # Caddy and homelab_db can reach this container
 
   storage:
     ports:
-      - '9000:9000'        # S3 API (accessible to web service via internal network)
+      - '9000:9000'         # S3 API (accessible to web service via internal network)
     # Remove console port in production for security
     restart: unless-stopped
-
-  caddy:
-    build:
-      context: .
-      dockerfile: Dockerfile.caddy
-    restart: unless-stopped
-    ports:
-      - '80:80'
-      - '443:443'
-      - '443:443/udp'      # HTTP/3
-    environment:
-      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - web
-
-volumes:
-  caddy_data:
-  caddy_config:
