@@ -1,7 +1,8 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Fraunces, Inter } from 'next/font/google';
 import { ThemeProvider } from 'next-themes';
 import { Toaster } from 'sonner';
+import { ServiceWorkerRegistration } from '@/components/ServiceWorkerRegistration';
 import './globals.css';
 
 const fraunces = Fraunces({
@@ -19,6 +20,19 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: 'TravelBuddy',
   description: 'Import, organize, and plan your trips.',
+  manifest: '/manifest.webmanifest',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'TravelBuddy',
+  },
+  icons: {
+    apple: '/apple-touch-icon.png',
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: '#FACC15',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -28,6 +42,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           {children}
           <Toaster richColors position="bottom-right" />
+          <ServiceWorkerRegistration />
         </ThemeProvider>
       </body>
     </html>

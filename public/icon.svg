@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#FACC15"/>
+  <g fill="#111827">
+    <!-- Fuselage -->
+    <ellipse cx="256" cy="248" rx="22" ry="130"/>
+    <!-- Main wings -->
+    <polygon points="240,210 100,300 100,328 240,272"/>
+    <polygon points="272,210 412,300 412,328 272,272"/>
+    <!-- Horizontal stabilizers -->
+    <polygon points="242,348 172,392 172,408 242,378"/>
+    <polygon points="270,348 340,392 340,408 270,378"/>
+  </g>
+</svg>
