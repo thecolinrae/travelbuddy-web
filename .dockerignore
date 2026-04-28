@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+*.md
+.env*
+!.env.example
+docker-compose*.yml
+Dockerfile
+Dockerfile.caddy
+Makefile
+Caddyfile
+backup_*.sql.gz
