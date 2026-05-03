@@ -9,11 +9,15 @@ import {
   saveTimeline,
   loadActivities,
   saveActivities,
+  updateBudgetGoals,
   type TripRow,
 } from '@/services/db';
 import { suggestActivities } from '@/services/claude';
+import { enrichIfMissingAddress } from '@/services/activityEnrich';
+import { verifyPlaceAddress } from '@/services/places';
+import { nanoid } from '@/services/nanoid';
 import { makeCost, fetchRatesFromPreferred } from '@/services/currency';
-import type { Cost, ExpenseEvent, TimelineEvent } from '@/types';
+import type { Activity, ActivityType, BudgetItemCategory, Cost, ExpenseEvent, TimelineEvent } from '@/types';
 
 function ok(data: unknown) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
@@ -240,6 +244,336 @@ export function createMcpServer(userId: string): McpServer {
       const merged = [...(existing?.savedActivities ?? []), ...newOnes];
       await saveActivities(tripId, destination, merged);
       return ok({ added: newOnes.length, activities: newOnes });
+    },
+  );
+
+  // ── Activity write tools (owner only) ──────────────────────────────────────
+  //
+  // IMPORTANT: Never add a tool here that invokes Claude chat, calls an AI
+  // agent, or delegates to the TravelBuddy chatbot. Doing so would create a
+  // logic loop: chat → agents-web agent → MCP → chat → ...
+  //
+  // Tools that call Claude for data enrichment (enrichIfMissingAddress,
+  // suggest_activities) are acceptable because they are leaf operations, not
+  // conversational agent calls.
+
+  server.registerTool(
+    'add_activity',
+    {
+      description: 'Add a new activity to a trip\'s activity pool. Enriches details and verifies the address via Google Maps. Owner only.',
+      inputSchema: {
+        tripId: z.string(),
+        name: z.string().describe('Activity name'),
+        description: z.string().describe('2–3 sentence description'),
+        type: z.enum(['sightseeing', 'food', 'adventure', 'culture', 'shopping', 'nightlife', 'nature', 'wellness']),
+        city: z.string().describe('City where the activity takes place'),
+        scheduledDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('YYYY-MM-DD'),
+        scheduledTime: z.string().regex(/^\d{2}:\d{2}$/).optional().describe('HH:MM (24-hour)'),
+        estimatedCost: z.string().optional().describe('e.g. "$10–20 per person"'),
+        duration: z.string().optional().describe('e.g. "2–3 hours"'),
+        tips: z.string().optional().describe('One practical tip for visitors'),
+      },
+    },
+    async ({ tripId, name, description, type, city, scheduledDate, scheduledTime, estimatedCost, duration, tips }) => {
+      const trip = await getTrip(tripId, userId);
+      if (!trip) return fail('Trip not found or not accessible');
+      if (trip.userId !== userId) return fail('Forbidden: only the trip owner can add activities');
+
+      const existing = await loadActivities(tripId);
+      const activities: Activity[] = existing?.savedActivities ?? [];
+      const destination = existing?.destination ?? trip.destination;
+
+      const newActivity: Activity = {
+        id: nanoid(12),
+        name,
+        description,
+        type: type as ActivityType,
+        city,
+        scheduledDate,
+        scheduledTime,
+        estimatedCost,
+        duration,
+        tips,
+        saved: true,
+      };
+
+      const enriched = await enrichIfMissingAddress(newActivity);
+
+      const verification = await verifyPlaceAddress(enriched.name, enriched.city ?? '');
+      if (verification.permanentlyClosed) {
+        return fail(`"${enriched.name}" appears to be permanently closed according to Google Maps. Suggest an alternative.`);
+      }
+      const verified: Activity = {
+        ...enriched,
+        ...(verification.found && {
+          address: verification.address ?? enriched.address,
+          latitude: verification.lat,
+          longitude: verification.lng,
+        }),
+      };
+
+      await saveActivities(tripId, destination, [...activities, verified]);
+      return ok({ success: true, activity: verified });
+    },
+  );
+
+  server.registerTool(
+    'reschedule_activity',
+    {
+      description: 'Move a scheduled activity to a different date or time. Owner only.',
+      inputSchema: {
+        tripId: z.string(),
+        activityId: z.string().describe('Activity ID from get_activities'),
+        scheduledDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe('YYYY-MM-DD'),
+        scheduledTime: z.string().regex(/^\d{2}:\d{2}$/).optional().describe('HH:MM (24-hour)'),
+      },
+    },
+    async ({ tripId, activityId, scheduledDate, scheduledTime }) => {
+      const trip = await getTrip(tripId, userId);
+      if (!trip) return fail('Trip not found or not accessible');
+      if (trip.userId !== userId) return fail('Forbidden: only the trip owner can reschedule activities');
+
+      const existing = await loadActivities(tripId);
+      const activities: Activity[] = existing?.savedActivities ?? [];
+      const destination = existing?.destination ?? trip.destination;
+      const idx = activities.findIndex((a) => a.id === activityId);
+      if (idx === -1) return fail('Activity not found');
+
+      activities[idx] = await enrichIfMissingAddress({
+        ...activities[idx],
+        scheduledDate,
+        scheduledTime: scheduledTime ?? undefined,
+      });
+      await saveActivities(tripId, destination, activities);
+      return ok({ success: true, activity: activities[idx] });
+    },
+  );
+
+  server.registerTool(
+    'remove_activity',
+    {
+      description: 'Unschedule an activity (keep it saved but remove its date) or delete it entirely. Owner only.',
+      inputSchema: {
+        tripId: z.string(),
+        activityId: z.string().describe('Activity ID from get_activities'),
+        action: z.enum(['unschedule', 'delete']).describe('"unschedule" removes the date; "delete" removes the activity entirely'),
+      },
+    },
+    async ({ tripId, activityId, action }) => {
+      const trip = await getTrip(tripId, userId);
+      if (!trip) return fail('Trip not found or not accessible');
+      if (trip.userId !== userId) return fail('Forbidden: only the trip owner can remove activities');
+
+      const existing = await loadActivities(tripId);
+      let activities: Activity[] = existing?.savedActivities ?? [];
+      const destination = existing?.destination ?? trip.destination;
+      const target = activities.find((a) => a.id === activityId);
+      if (!target) return fail('Activity not found');
+
+      if (action === 'delete') {
+        activities = activities.filter((a) => a.id !== activityId);
+      } else {
+        activities = activities.map((a) =>
+          a.id === activityId ? { ...a, scheduledDate: undefined, scheduledTime: undefined } : a,
+        );
+      }
+      await saveActivities(tripId, destination, activities);
+      return ok({ success: true });
+    },
+  );
+
+  server.registerTool(
+    'update_activity',
+    {
+      description: 'Update the city or address of an existing activity. Owner only.',
+      inputSchema: {
+        tripId: z.string(),
+        activityId: z.string().describe('Activity ID from get_activities'),
+        city: z.string().optional().describe('Updated city name'),
+        address: z.string().optional().describe('Updated address'),
+      },
+    },
+    async ({ tripId, activityId, city, address }) => {
+      const trip = await getTrip(tripId, userId);
+      if (!trip) return fail('Trip not found or not accessible');
+      if (trip.userId !== userId) return fail('Forbidden: only the trip owner can update activities');
+
+      const existing = await loadActivities(tripId);
+      const activities: Activity[] = existing?.savedActivities ?? [];
+      const destination = existing?.destination ?? trip.destination;
+      const idx = activities.findIndex((a) => a.id === activityId);
+      if (idx === -1) return fail('Activity not found');
+
+      activities[idx] = {
+        ...activities[idx],
+        ...(city !== undefined && { city }),
+        ...(address !== undefined && { address }),
+      };
+      await saveActivities(tripId, destination, activities);
+      return ok({ success: true, activity: activities[idx] });
+    },
+  );
+
+  server.registerTool(
+    'update_timeline_event',
+    {
+      description: 'Update the city or address of a timeline event (hotel, activity booking, etc.). Owner only.',
+      inputSchema: {
+        tripId: z.string(),
+        eventId: z.string().describe('Event ID from get_timeline'),
+        locationCity: z.string().optional().describe('Updated city'),
+        locationAddress: z.string().optional().describe('Updated address'),
+      },
+    },
+    async ({ tripId, eventId, locationCity, locationAddress }) => {
+      const trip = await getTrip(tripId, userId);
+      if (!trip) return fail('Trip not found or not accessible');
+      if (trip.userId !== userId) return fail('Forbidden: only the trip owner can update timeline events');
+
+      const timeline = await loadTimeline(tripId);
+      const idx = timeline.findIndex((e) => e.id === eventId);
+      if (idx === -1) return fail('Event not found');
+
+      timeline[idx] = {
+        ...timeline[idx],
+        ...(locationCity !== undefined && { locationCity }),
+        ...(locationAddress !== undefined && { locationAddress }),
+      } as TimelineEvent;
+      await saveTimeline(tripId, timeline);
+      return ok({ success: true, event: timeline[idx] });
+    },
+  );
+
+  server.registerTool(
+    'verify_address',
+    {
+      description: 'Verify the address of an activity or timeline event against Google Maps. Checks closure status and corrects stored address and coordinates. Provide either activityId or eventId. Owner only.',
+      inputSchema: {
+        tripId: z.string(),
+        activityId: z.string().optional().describe('Activity ID from get_activities — provide this OR eventId'),
+        eventId: z.string().optional().describe('Event ID from get_timeline — provide this OR activityId'),
+      },
+    },
+    async ({ tripId, activityId, eventId }) => {
+      const trip = await getTrip(tripId, userId);
+      if (!trip) return fail('Trip not found or not accessible');
+      if (trip.userId !== userId) return fail('Forbidden: only the trip owner can verify addresses');
+
+      if (activityId) {
+        const existing = await loadActivities(tripId);
+        const activities: Activity[] = existing?.savedActivities ?? [];
+        const destination = existing?.destination ?? trip.destination;
+        const idx = activities.findIndex((a) => a.id === activityId);
+        if (idx === -1) return fail('Activity not found');
+
+        const activity = activities[idx];
+        const v = await verifyPlaceAddress(activity.name, activity.city ?? '');
+        if (!v.found) return ok({ verified: false, message: `Could not find "${activity.name}" on Google Maps — address unchanged.` });
+        if (v.permanentlyClosed) return ok({ verified: true, permanentlyClosed: true, message: `"${activity.name}" is permanently closed on Google Maps.`, matchedName: v.matchedName });
+
+        activities[idx] = { ...activity, address: v.address ?? activity.address, latitude: v.lat, longitude: v.lng };
+        await saveActivities(tripId, destination, activities);
+        return ok({ verified: true, permanentlyClosed: false, updatedAddress: v.address, matchedName: v.matchedName });
+      }
+
+      if (eventId) {
+        const timeline = await loadTimeline(tripId);
+        const idx = timeline.findIndex((e) => e.id === eventId);
+        if (idx === -1) return fail('Event not found');
+
+        const event = timeline[idx];
+        let searchName = '';
+        const searchCity = event.locationCity;
+        if (event.type === 'hotel') {
+          searchName = (event as import('@/types').HotelCheckInEvent).hotelName;
+        } else if (event.type === 'activity') {
+          searchName = (event as import('@/types').ActivityEvent).description;
+        } else {
+          return fail('Address verification is supported for hotel and activity events only.');
+        }
+
+        const v = await verifyPlaceAddress(searchName, searchCity);
+        if (!v.found) return ok({ verified: false, message: `Could not find "${searchName}" on Google Maps — address unchanged.` });
+        if (v.permanentlyClosed) return ok({ verified: true, permanentlyClosed: true, message: `"${searchName}" is permanently closed on Google Maps.`, matchedName: v.matchedName });
+
+        timeline[idx] = { ...timeline[idx], locationAddress: v.address ?? event.locationAddress } as TimelineEvent;
+        await saveTimeline(tripId, timeline);
+        return ok({ verified: true, permanentlyClosed: false, updatedAddress: v.address, matchedName: v.matchedName });
+      }
+
+      return fail('Provide either activityId or eventId.');
+    },
+  );
+
+  server.registerTool(
+    'merge_events',
+    {
+      description: 'Link a planned activity to a confirmed activity booking event. The activityId comes from get_activities; the eventId comes from get_timeline (type=activity). Owner only.',
+      inputSchema: {
+        tripId: z.string(),
+        activityId: z.string().describe('Planned activity ID from get_activities'),
+        eventId: z.string().describe('Activity booking event ID from get_timeline'),
+      },
+    },
+    async ({ tripId, activityId, eventId }) => {
+      const trip = await getTrip(tripId, userId);
+      if (!trip) return fail('Trip not found or not accessible');
+      if (trip.userId !== userId) return fail('Forbidden: only the trip owner can merge events');
+
+      const [activitiesData, timeline] = await Promise.all([loadActivities(tripId), loadTimeline(tripId)]);
+      const activities: Activity[] = activitiesData?.savedActivities ?? [];
+      const actIdx = activities.findIndex((a) => a.id === activityId);
+      if (actIdx === -1) return fail('Activity not found');
+      const evIdx = timeline.findIndex((e) => e.id === eventId);
+      if (evIdx === -1) return fail('Event not found');
+      if (timeline[evIdx].type !== 'activity') return fail('Event is not an activity booking — only activity-type events can be linked');
+
+      const activity = activities[actIdx];
+      const event = timeline[evIdx];
+      if (activity.linkedEventId) return fail(`"${activity.name}" is already linked to another event`);
+      if ((event as TimelineEvent & { linkedActivityId?: string }).linkedActivityId) return fail('That event is already linked to another activity');
+
+      activities[actIdx] = { ...activity, linkedEventId: eventId };
+      timeline[evIdx] = { ...event, linkedActivityId: activityId };
+      await Promise.all([
+        saveActivities(tripId, activitiesData?.destination ?? trip.destination, activities),
+        saveTimeline(tripId, timeline),
+      ]);
+      return ok({ success: true, message: `Linked "${activity.name}" with event ${eventId}.` });
+    },
+  );
+
+  server.registerTool(
+    'set_budget_targets',
+    {
+      description: "Update the trip's overall budget goal and/or per-category spending targets. Owner only.",
+      inputSchema: {
+        tripId: z.string(),
+        budgetGoal: z.number().positive().optional().describe("New overall trip budget in the trip's preferred currency"),
+        categoryGoals: z.object({
+          flights: z.number().optional(),
+          hotels: z.number().optional(),
+          car_rental: z.number().optional(),
+          activities: z.number().optional(),
+          transport: z.number().optional(),
+          food: z.number().optional(),
+          insurance: z.number().optional(),
+          other: z.number().optional(),
+        }).optional().describe('Per-category spending targets (only include categories to change)'),
+      },
+    },
+    async ({ tripId, budgetGoal, categoryGoals }) => {
+      const trip = await getTrip(tripId, userId);
+      if (!trip) return fail('Trip not found or not accessible');
+      if (trip.userId !== userId) return fail('Forbidden: only the trip owner can set budget targets');
+
+      const updatedGoal = budgetGoal ?? trip.budgetGoal;
+      const updatedCategoryGoals: Partial<Record<BudgetItemCategory, number>> = {
+        ...(trip.categoryGoals ?? {}),
+        ...(categoryGoals ?? {}),
+      };
+      await updateBudgetGoals(tripId, userId, updatedGoal ?? null, updatedCategoryGoals);
+      return ok({ success: true, budgetGoal: updatedGoal, categoryGoals: updatedCategoryGoals });
     },
   );
 

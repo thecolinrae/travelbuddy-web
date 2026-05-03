@@ -4,13 +4,15 @@ import { buildTripContext } from '@/services/tripContext';
 import {
   streamTripChat,
   suggestActivities,
-  enrichActivity,
   type ChatToolDefinition,
   type AnthropicChatMessage,
   type AnthropicContentBlock,
 } from '@/services/claude';
 import { filterOpenPlaces, verifyPlaceAddress } from '@/services/places';
 import { nanoid } from '@/services/nanoid';
+import { enrichIfMissingAddress } from '@/services/activityEnrich';
+import { streamAgentChat } from '@/services/agentClient';
+import { generateMcpToken } from '@/lib/mcp-token';
 import type { Activity, ActivityType, BudgetItemCategory, TimelineEvent } from '@/types';
 import type { TripRow } from '@/services/db';
 
@@ -232,29 +234,6 @@ const CHAT_TOOLS: ChatToolDefinition[] = [
 interface ToolExecutionResult {
   content: string;
   mutated: boolean;
-}
-
-/** Enrich an activity in-place if it has no address yet. Non-fatal. */
-async function enrichIfMissingAddress(activity: Activity): Promise<Activity> {
-  if (activity.address) return activity;
-  try {
-    const enriched = await enrichActivity(activity.name, activity.city ?? '');
-    return {
-      ...activity,
-      description: activity.description || enriched.description || activity.description,
-      type: activity.type || enriched.type || activity.type,
-      estimatedCost: activity.estimatedCost ?? enriched.estimatedCost,
-      duration: activity.duration ?? enriched.duration,
-      bestTime: activity.bestTime ?? enriched.bestTime,
-      tips: activity.tips ?? enriched.tips,
-      familyFriendly: activity.familyFriendly ?? enriched.familyFriendly,
-      highlights: activity.highlights ?? enriched.highlights,
-      address: enriched.locationAddress,
-      city: activity.city || enriched.city || activity.city,
-    };
-  } catch {
-    return activity;
-  }
 }
 
 async function executeTool(
@@ -613,6 +592,71 @@ async function executeTool(
   return { content: JSON.stringify({ error: `Unknown tool: ${toolName}` }), mutated: false };
 }
 
+// ─── agents-web delegation ────────────────────────────────────────────────────
+
+const AGENTS_WEB_URL = process.env.AGENTS_WEB_URL?.trim();
+const CHAT_AGENT_ID = process.env.CHAT_AGENT_ID?.trim();
+const AGENTS_WEB_API_KEY = process.env.AGENTS_WEB_API_KEY?.trim();
+const TRAVELBUDDY_MCP_CONNECTOR_ID = process.env.TRAVELBUDDY_MCP_CONNECTOR_ID?.trim();
+
+async function handleViaAgentsWeb(params: {
+  userId: string;
+  tripId: string;
+  trip: TripRow;
+  body: ChatRequest;
+}): Promise<Response> {
+  const { userId, tripId, trip, body } = params;
+  const { messages: clientMessages, currentDayIndex } = body;
+
+  const [timeline, activitiesData] = await Promise.all([
+    loadTimeline(tripId),
+    loadActivities(tripId),
+  ]);
+
+  const { systemPrompt } = buildTripContext({
+    trip,
+    timeline,
+    activities: activitiesData?.savedActivities ?? [],
+    currentDayIndex,
+  });
+
+  const conversationLines = clientMessages.map(
+    (m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`,
+  );
+  const task = `${systemPrompt}\n\n---\n\n## Conversation\n\n${conversationLines.join('\n\n')}`;
+
+  const userMcpToken = generateMcpToken(userId);
+  const encoder = new TextEncoder();
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (event: ChatSSEEvent) => {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+      };
+      try {
+        for await (const event of streamAgentChat({
+          agentsWebUrl: AGENTS_WEB_URL!,
+          apiKey: AGENTS_WEB_API_KEY!,
+          agentId: CHAT_AGENT_ID!,
+          connectorId: TRAVELBUDDY_MCP_CONNECTOR_ID!,
+          userMcpToken,
+          task,
+        })) {
+          send(event);
+        }
+      } catch (err) {
+        send({ type: 'error', message: err instanceof Error ? err.message : 'Unexpected error' });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
+  });
+}
+
 // ─── Route handler ────────────────────────────────────────────────────────────
 
 export const POST = withTripAuth(async ({ userId, trip, params, request }) => {
@@ -620,6 +664,11 @@ export const POST = withTripAuth(async ({ userId, trip, params, request }) => {
   const isOwner = trip.userId === userId;
 
   const body = (await request.json()) as ChatRequest;
+
+  if (AGENTS_WEB_URL && CHAT_AGENT_ID && AGENTS_WEB_API_KEY && TRAVELBUDDY_MCP_CONNECTOR_ID) {
+    return handleViaAgentsWeb({ userId, tripId, trip, body });
+  }
+
   const { messages: clientMessages, currentDayIndex } = body;
 
   const [timeline, activitiesData] = await Promise.all([
