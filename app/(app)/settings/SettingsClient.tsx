@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useTheme } from 'next-themes';
-import { Monitor, Sun, Moon, Check } from 'lucide-react';
+import { Monitor, Sun, Moon, Check, Copy, Terminal } from 'lucide-react';
 import { toast } from 'sonner';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
@@ -13,13 +13,29 @@ interface Props {
   email: string;
   avatarUrl: string | null;
   preferredCurrency: string;
+  mcpToken: string;
+  appUrl: string;
 }
 
-export function SettingsClient({ name, email, avatarUrl, preferredCurrency: initial }: Props) {
+export function SettingsClient({ name, email, avatarUrl, preferredCurrency: initial, mcpToken, appUrl }: Props) {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   const [currency, setCurrency] = useState(initial);
   const [saving, setSaving] = useState(false);
+  const [copiedToken, setCopiedToken] = useState(false);
+  const [copiedConfig, setCopiedConfig] = useState(false);
+
+  const mcpConfigJson = JSON.stringify({
+    type: 'http',
+    url: `${appUrl}/api/mcp`,
+    headers: { Authorization: `Bearer ${mcpToken}` },
+  }, null, 2);
+
+  async function copyToClipboard(text: string, setCopied: (v: boolean) => void) {
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
 
   useEffect(() => setMounted(true), []);
 
@@ -122,6 +138,55 @@ export function SettingsClient({ name, email, avatarUrl, preferredCurrency: init
           <p className="text-xs text-muted-foreground">
             Used as the default for new trip imports.
           </p>
+        </div>
+      </section>
+
+      {/* Integrations */}
+      <section className="space-y-4">
+        <div className="flex items-center gap-2">
+          <Terminal className="h-4 w-4 text-muted-foreground" />
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Integrations
+          </h2>
+        </div>
+        <p className="text-sm text-muted-foreground leading-relaxed">
+          Use your personal bearer token to connect AI agents and MCP clients to your TravelBuddy account.
+          The token gives access to your trips and those shared with you.
+        </p>
+
+        <div className="space-y-1.5">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Bearer token</p>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 rounded-lg border bg-surface px-3 py-2 font-mono text-xs text-text-base break-all leading-relaxed">
+              {mcpToken}
+            </code>
+            <button
+              onClick={() => copyToClipboard(mcpToken, setCopiedToken)}
+              className="shrink-0 rounded-lg border bg-card p-2 hover:bg-surface transition-colors"
+              aria-label="Copy bearer token"
+            >
+              {copiedToken ? <Check className="h-4 w-4 text-green-600 dark:text-green-400" /> : <Copy className="h-4 w-4 text-muted-foreground" />}
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">MCP server config</p>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            Add this to your Claude Code project or Claude Desktop configuration.
+          </p>
+          <div className="flex items-start gap-2">
+            <pre className="flex-1 rounded-lg border bg-surface px-3 py-2 font-mono text-xs text-text-base overflow-x-auto leading-relaxed whitespace-pre-wrap break-all">
+              {mcpConfigJson}
+            </pre>
+            <button
+              onClick={() => copyToClipboard(mcpConfigJson, setCopiedConfig)}
+              className="shrink-0 rounded-lg border bg-card p-2 hover:bg-surface transition-colors mt-0"
+              aria-label="Copy MCP config"
+            >
+              {copiedConfig ? <Check className="h-4 w-4 text-green-600 dark:text-green-400" /> : <Copy className="h-4 w-4 text-muted-foreground" />}
+            </button>
+          </div>
         </div>
       </section>
     </div>

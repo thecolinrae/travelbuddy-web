@@ -1,6 +1,7 @@
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { redirect } from 'next/navigation';
+import { generateMcpToken } from '@/lib/mcp-token';
 import { SettingsClient } from './SettingsClient';
 
 export default async function SettingsPage() {
@@ -13,6 +14,9 @@ export default async function SettingsPage() {
     select: { name: true, email: true, avatarUrl: true, preferredCurrency: true },
   });
 
+  const mcpToken = generateMcpToken(userId);
+  const appUrl = process.env.NEXTAUTH_URL ?? 'http://localhost:3000';
+
   return (
     <main className="max-w-lg mx-auto px-4 py-8">
       <h1 className="text-2xl font-semibold tracking-tight mb-8">Settings</h1>
@@ -21,6 +25,8 @@ export default async function SettingsPage() {
         email={profile?.email ?? ''}
         avatarUrl={profile?.avatarUrl ?? null}
         preferredCurrency={profile?.preferredCurrency ?? 'CAD'}
+        mcpToken={mcpToken}
+        appUrl={appUrl}
       />
     </main>
   );
