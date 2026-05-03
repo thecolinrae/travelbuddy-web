@@ -17,9 +17,19 @@ const MUTATING_TOOLS = new Set([
   'add_expense',
 ]);
 
+export type AgentSuggestion = string | { title: string; detail?: string };
+
+export interface QuestionItem {
+  questionId: string;
+  question: string;
+  suggestions?: AgentSuggestion[];
+  multiSelect?: boolean;
+}
+
 export type ChatSSEEvent =
   | { type: 'text'; content: string }
   | { type: 'tool_result'; tool: string; result: unknown; mutated: boolean }
+  | { type: 'question'; questions: QuestionItem[] }
   | { type: 'error'; message: string }
   | { type: 'done' };
 
@@ -151,6 +161,8 @@ function mapEvent(event: Record<string, unknown>): ChatSSEEvent | null {
         result: event.result,
         mutated: MUTATING_TOOLS.has((event.toolName as string) ?? ''),
       };
+    case 'question':
+      return { type: 'question', questions: (event.questions as QuestionItem[]) ?? [] };
     case 'run_failed':
       return { type: 'error', message: (event.error as string) ?? 'Agent run failed' };
     case 'run_complete':

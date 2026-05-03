@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Send, MessageCircle } from 'lucide-react';
+import { Send, MessageCircle, CheckCircle2, Search, HelpCircle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Button } from '@/components/ui/button';
@@ -17,16 +17,32 @@ import { nanoid } from '@/services/nanoid';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+interface ToolCall {
+  tool: string;
+  mutated: boolean;
+}
+
 interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   isStreaming?: boolean;
+  toolCalls?: ToolCall[];
+}
+
+type AgentSuggestion = string | { title: string; detail?: string };
+
+interface QuestionItem {
+  questionId: string;
+  question: string;
+  suggestions?: AgentSuggestion[];
+  multiSelect?: boolean;
 }
 
 type ChatSSEEvent =
   | { type: 'text'; content: string }
   | { type: 'tool_result'; tool: string; result: unknown; mutated: boolean }
+  | { type: 'question'; questions: QuestionItem[] }
   | { type: 'error'; message: string }
   | { type: 'done' };
 
@@ -39,6 +55,35 @@ interface TripChatPanelProps {
   currentDayIndex: number;
   currentDate: string | null;
   onActivityMutation: () => void;
+}
+
+// ─── Tool label map ───────────────────────────────────────────────────────────
+
+const TOOL_LABELS: Record<string, string> = {
+  add_activity: 'Added activity',
+  schedule_activity: 'Scheduled activity',
+  reschedule_activity: 'Rescheduled activity',
+  remove_activity: 'Removed activity',
+  update_activity: 'Updated activity',
+  update_timeline_event: 'Updated event',
+  verify_address: 'Verified address',
+  merge_events: 'Merged events',
+  set_budget_targets: 'Set budget targets',
+  suggest_activities: 'Found suggestions',
+  create_trip: 'Created trip',
+  update_trip: 'Updated trip',
+  add_expense: 'Added expense',
+  get_trip: 'Fetched trip details',
+  list_trips: 'Listed trips',
+  get_activity: 'Fetched activity',
+  list_activities: 'Listed activities',
+  get_timeline: 'Fetched timeline',
+  search_place: 'Searched places',
+  get_budget_summary: 'Checked budget',
+};
+
+function getToolLabel(tool: string): string {
+  return TOOL_LABELS[tool] ?? tool.replace(/_/g, ' ');
 }
 
 // ─── Markdown renderer ────────────────────────────────────────────────────────
@@ -122,8 +167,28 @@ function ChatMarkdown({ content }: { content: string }) {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
+function ToolCallBadge({ tc }: { tc: ToolCall }) {
+  const Icon = tc.mutated ? CheckCircle2 : Search;
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium',
+        tc.mutated
+          ? 'bg-primary/10 text-primary dark:bg-primary/20'
+          : 'bg-muted text-text-muted',
+      )}
+    >
+      <Icon className="h-3 w-3 shrink-0" />
+      {getToolLabel(tc.tool)}
+    </span>
+  );
+}
+
 function MessageBubble({ message }: { message: Message }) {
   const isUser = message.role === 'user';
+  const hasTools = (message.toolCalls?.length ?? 0) > 0;
+  const isThinking = message.isStreaming && message.content === '' && !hasTools;
+
   return (
     <div className={cn('flex', isUser ? 'justify-end' : 'justify-start')}>
       <div
@@ -137,17 +202,29 @@ function MessageBubble({ message }: { message: Message }) {
         {isUser ? (
           message.content
         ) : (
-          <ChatMarkdown content={message.content} />
-        )}
-        {message.isStreaming && message.content === '' && (
-          <span className="inline-flex gap-1 items-center h-4">
-            <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce [animation-delay:0ms]" />
-            <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce [animation-delay:150ms]" />
-            <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce [animation-delay:300ms]" />
-          </span>
-        )}
-        {message.isStreaming && message.content !== '' && (
-          <span className="inline-block w-1.5 h-3.5 ml-0.5 bg-text-base opacity-60 animate-pulse rounded-sm align-middle" />
+          <>
+            {isThinking && (
+              <span className="inline-flex items-center gap-1.5 text-sm text-text-muted">
+                <span className="h-2 w-2 rounded-full bg-primary animate-pulse shrink-0" />
+                Thinking…
+              </span>
+            )}
+            {hasTools && (
+              <div className={cn('flex flex-wrap gap-1', message.content && 'mb-2')}>
+                {message.toolCalls!.map((tc, i) => (
+                  <ToolCallBadge key={i} tc={tc} />
+                ))}
+              </div>
+            )}
+            {message.content && (
+              <>
+                <ChatMarkdown content={message.content} />
+                {message.isStreaming && (
+                  <span className="inline-block w-1.5 h-3.5 ml-0.5 bg-text-base opacity-60 animate-pulse rounded-sm align-middle" />
+                )}
+              </>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -170,6 +247,118 @@ function EmptyState() {
   );
 }
 
+// ─── Inline question form ─────────────────────────────────────────────────────
+
+function InlineQuestionForm({
+  questions,
+  onSubmit,
+}: {
+  questions: QuestionItem[];
+  onSubmit: (answers: Array<{ questionId: string; answer: string }>) => void;
+}) {
+  const [step, setStep] = useState(0);
+  const [answers, setAnswers] = useState<string[]>(questions.map(() => ''));
+  const [submitting, setSubmitting] = useState(false);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, [step]);
+
+  const current = questions[step];
+  const isLast = step === questions.length - 1;
+  const currentAnswer = answers[step];
+  const suggestionValues = (current.suggestions ?? []).map((s) =>
+    typeof s === 'string' ? s : s.title,
+  );
+
+  function setCurrentAnswer(val: string) {
+    setAnswers((prev) => prev.map((a, i) => (i === step ? val : a)));
+  }
+
+  function handleNext() {
+    if (!currentAnswer.trim() || submitting) return;
+    if (isLast) {
+      setSubmitting(true);
+      onSubmit(questions.map((q, i) => ({ questionId: q.questionId, answer: answers[i] })));
+    } else {
+      setStep((s) => s + 1);
+    }
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleNext();
+    }
+  }
+
+  return (
+    <div className="shrink-0 border-t border-border px-4 py-3 bg-surface/50 dark:bg-slate-800/50">
+      <div className="flex items-start gap-2 mb-2">
+        <HelpCircle className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+        <p className="text-sm font-medium text-text-base leading-snug">{current.question}</p>
+      </div>
+      {questions.length > 1 && (
+        <div className="flex gap-1 mb-2 pl-6">
+          {questions.map((_, i) => (
+            <span
+              key={i}
+              className={cn(
+                'h-1.5 w-4 rounded-full transition-colors',
+                i === step ? 'bg-primary' : i < step ? 'bg-primary/40' : 'bg-muted',
+              )}
+            />
+          ))}
+        </div>
+      )}
+      {suggestionValues.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-2 pl-6">
+          {suggestionValues.map((val, i) => (
+            <button
+              key={i}
+              onClick={() => setCurrentAnswer(currentAnswer === val ? '' : val)}
+              className={cn(
+                'text-xs px-2.5 py-1 rounded-full border transition-colors',
+                currentAnswer === val
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'border-border text-text-base hover:bg-muted',
+              )}
+            >
+              {val}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="flex gap-2 items-end">
+        <textarea
+          ref={inputRef}
+          value={currentAnswer}
+          onChange={(e) => setCurrentAnswer(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Type your answer…"
+          rows={1}
+          disabled={submitting}
+          className={cn(
+            'flex-1 resize-none rounded-lg border border-border bg-surface px-3 py-2',
+            'text-sm text-text-base leading-relaxed placeholder:text-text-muted',
+            'focus:outline-none focus:ring-2 focus:ring-primary overflow-hidden',
+            'disabled:opacity-50',
+            'dark:bg-slate-800 dark:border-slate-700',
+          )}
+        />
+        <Button
+          onClick={handleNext}
+          disabled={!currentAnswer.trim() || submitting}
+          size="sm"
+          className="bg-primary text-primary-foreground hover:bg-primary-dark font-semibold shrink-0 h-9 w-9 p-0"
+        >
+          <Send className="h-4 w-4" />
+          <span className="sr-only">{isLast ? 'Answer' : 'Next'}</span>
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function TripChatPanel({
@@ -183,6 +372,7 @@ export function TripChatPanel({
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [pendingQuestion, setPendingQuestion] = useState<QuestionItem[] | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const hasMutationsRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -202,6 +392,17 @@ export function TripChatPanel({
     if (!el) return;
     el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+  }
+
+  async function handleAnswerSubmit(answers: Array<{ questionId: string; answer: string }>) {
+    const runId = agentRunIdRef.current;
+    setPendingQuestion(null);
+    if (!runId) return;
+    await fetch(`/api/trips/${tripId}/chat/answer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runId, answers }),
+    });
   }
 
   async function sendMessage() {
@@ -278,9 +479,19 @@ export function TripChatPanel({
                 m.id === assistantMsgId ? { ...m, content: m.content + event.content } : m,
               ),
             );
-          } else if (event.type === 'tool_result' && event.mutated) {
-            hasMutationsRef.current = true;
+          } else if (event.type === 'tool_result') {
+            if (event.mutated) hasMutationsRef.current = true;
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsgId
+                  ? { ...m, toolCalls: [...(m.toolCalls ?? []), { tool: event.tool, mutated: event.mutated }] }
+                  : m,
+              ),
+            );
+          } else if (event.type === 'question') {
+            setPendingQuestion(event.questions);
           } else if (event.type === 'error') {
+            setPendingQuestion(null);
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantMsgId
@@ -289,6 +500,7 @@ export function TripChatPanel({
               ),
             );
           } else if (event.type === 'done') {
+            setPendingQuestion(null);
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantMsgId ? { ...m, isStreaming: false } : m,
@@ -299,6 +511,7 @@ export function TripChatPanel({
       }
     } catch (err) {
       if ((err as Error).name !== 'AbortError') {
+        setPendingQuestion(null);
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantMsgId
@@ -355,40 +568,44 @@ export function TripChatPanel({
           )}
         </div>
 
-        {/* Input */}
-        <div className="shrink-0 border-t border-border px-4 py-3">
-          <div className="flex gap-2 items-end">
-            <textarea
-              ref={textareaRef}
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onInput={handleInput}
-              onKeyDown={handleKeyDown}
-              placeholder="Ask about your trip…"
-              rows={1}
-              disabled={isLoading}
-              className={cn(
-                'flex-1 resize-none rounded-lg border border-border bg-surface px-3 py-2',
-                'text-sm text-text-base leading-relaxed placeholder:text-text-muted',
-                'focus:outline-none focus:ring-2 focus:ring-primary',
-                'disabled:opacity-50 overflow-hidden',
-                'dark:bg-slate-800 dark:border-slate-700',
-              )}
-            />
-            <Button
-              onClick={sendMessage}
-              disabled={!inputValue.trim() || isLoading}
-              size="sm"
-              className="bg-primary text-primary-foreground hover:bg-primary-dark font-semibold shrink-0 h-9 w-9 p-0"
-            >
-              <Send className="h-4 w-4" />
-              <span className="sr-only">Send</span>
-            </Button>
+        {/* Input — replaced by question form when agent asks a question */}
+        {pendingQuestion ? (
+          <InlineQuestionForm questions={pendingQuestion} onSubmit={handleAnswerSubmit} />
+        ) : (
+          <div className="shrink-0 border-t border-border px-4 py-3">
+            <div className="flex gap-2 items-end">
+              <textarea
+                ref={textareaRef}
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onInput={handleInput}
+                onKeyDown={handleKeyDown}
+                placeholder="Ask about your trip…"
+                rows={1}
+                disabled={isLoading}
+                className={cn(
+                  'flex-1 resize-none rounded-lg border border-border bg-surface px-3 py-2',
+                  'text-sm text-text-base leading-relaxed placeholder:text-text-muted',
+                  'focus:outline-none focus:ring-2 focus:ring-primary',
+                  'disabled:opacity-50 overflow-hidden',
+                  'dark:bg-slate-800 dark:border-slate-700',
+                )}
+              />
+              <Button
+                onClick={sendMessage}
+                disabled={!inputValue.trim() || isLoading}
+                size="sm"
+                className="bg-primary text-primary-foreground hover:bg-primary-dark font-semibold shrink-0 h-9 w-9 p-0"
+              >
+                <Send className="h-4 w-4" />
+                <span className="sr-only">Send</span>
+              </Button>
+            </div>
+            <p className="type-caption mt-2 text-center">
+              Shift + Enter for new line
+            </p>
           </div>
-          <p className="type-caption mt-2 text-center">
-            Shift + Enter for new line
-          </p>
-        </div>
+        )}
       </SheetContent>
     </Sheet>
   );

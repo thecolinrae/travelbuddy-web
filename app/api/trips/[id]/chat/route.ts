@@ -28,6 +28,7 @@ interface ChatRequest {
 type ChatSSEEvent =
   | { type: 'text'; content: string }
   | { type: 'tool_result'; tool: string; result: unknown; mutated: boolean }
+  | { type: 'question'; questions: import('@/services/agentClient').QuestionItem[] }
   | { type: 'error'; message: string }
   | { type: 'done' };
 
