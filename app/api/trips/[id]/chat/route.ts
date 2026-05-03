@@ -732,7 +732,7 @@ export const POST = withTripAuth(async ({ userId, trip, params, request }) => {
             // Read-only users cannot mutate activities
             if (
               !isOwner &&
-              ['add_activity', 'schedule_activity', 'reschedule_activity', 'remove_activity', 'suggest_activities', 'set_budget_targets', 'verify_address', 'merge_events'].includes(
+              ['add_activity', 'schedule_activity', 'reschedule_activity', 'remove_activity', 'suggest_activities', 'set_budget_targets', 'merge_events'].includes(
                 tc.name,
               )
             ) {

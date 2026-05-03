@@ -457,7 +457,6 @@ export function createMcpServer(userId: string): McpServer {
     async ({ tripId, activityId, eventId }) => {
       const trip = await getTrip(tripId, userId);
       if (!trip) return fail('Trip not found or not accessible');
-      if (trip.userId !== userId) return fail('Forbidden: only the trip owner can verify addresses');
 
       if (activityId) {
         const existing = await loadActivities(tripId);
