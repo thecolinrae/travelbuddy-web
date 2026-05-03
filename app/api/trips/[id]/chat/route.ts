@@ -11,7 +11,7 @@ import {
 import { filterOpenPlaces, verifyPlaceAddress } from '@/services/places';
 import { nanoid } from '@/services/nanoid';
 import { enrichIfMissingAddress } from '@/services/activityEnrich';
-import { streamAgentChat } from '@/services/agentClient';
+import { streamAgentChat, continueAgentChat } from '@/services/agentClient';
 import { generateMcpToken } from '@/lib/mcp-token';
 import type { Activity, ActivityType, BudgetItemCategory, TimelineEvent } from '@/types';
 import type { TripRow } from '@/services/db';
@@ -21,6 +21,7 @@ import type { TripRow } from '@/services/db';
 interface ChatRequest {
   messages: { role: 'user' | 'assistant'; content: string }[];
   currentDayIndex: number;
+  agentRunId?: string;
 }
 
 type ChatSSEEvent =
@@ -606,29 +607,49 @@ async function handleViaAgentsWeb(params: {
   body: ChatRequest;
 }): Promise<Response> {
   const { userId, tripId, trip, body } = params;
-  const { messages: clientMessages, currentDayIndex } = body;
-
-  const destinations = trip.destinations.length > 0 ? trip.destinations : [trip.destination].filter(Boolean);
-  const days: string[] = [];
-  if (trip.startDate && currentDayIndex >= 0) {
-    const d = new Date(trip.startDate + 'T12:00:00');
-    d.setDate(d.getDate() + currentDayIndex);
-    days.push(d.toISOString().slice(0, 10));
-  }
-
-  const contextLines = [
-    `Trip ID: ${tripId}`,
-    `Destinations: ${destinations.join(', ') || 'unknown'}`,
-    `Dates: ${trip.startDate ?? '?'} → ${trip.endDate ?? '?'}`,
-    ...(days.length > 0 ? [`Currently viewing: ${days[0]}`] : []),
-  ];
-
-  const conversationLines = clientMessages.map(
-    (m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`,
-  );
-  const task = `## Trip\n${contextLines.join('\n')}\n\n## Conversation\n\n${conversationLines.join('\n\n')}`;
+  const { messages: clientMessages, currentDayIndex, agentRunId } = body;
 
   const userMcpToken = generateMcpToken(userId);
+
+  let chatStream;
+  if (agentRunId) {
+    const latestMessage = clientMessages.filter((m) => m.role === 'user').at(-1)?.content ?? '';
+    chatStream = await continueAgentChat({
+      agentsWebUrl: AGENTS_WEB_URL!,
+      apiKey: AGENTS_WEB_API_KEY!,
+      runId: agentRunId,
+      message: latestMessage,
+    });
+  } else {
+    const destinations = trip.destinations.length > 0 ? trip.destinations : [trip.destination].filter(Boolean);
+    let viewingDate: string | null = null;
+    if (trip.startDate && currentDayIndex >= 0) {
+      const d = new Date(trip.startDate + 'T12:00:00');
+      d.setDate(d.getDate() + currentDayIndex);
+      viewingDate = d.toISOString().slice(0, 10);
+    }
+
+    const contextLines = [
+      `Trip ID: ${tripId}`,
+      `Destinations: ${destinations.join(', ') || 'unknown'}`,
+      `Dates: ${trip.startDate ?? '?'} → ${trip.endDate ?? '?'}`,
+      ...(viewingDate ? [`Currently viewing: ${viewingDate}`] : []),
+    ];
+
+    const lastUserMessage = clientMessages.filter((m) => m.role === 'user').at(-1)?.content ?? '';
+    const task = `## Trip\n${contextLines.join('\n')}\n\n${lastUserMessage}`;
+
+    chatStream = await streamAgentChat({
+      agentsWebUrl: AGENTS_WEB_URL!,
+      apiKey: AGENTS_WEB_API_KEY!,
+      agentId: CHAT_AGENT_ID!,
+      connectorId: TRAVELBUDDY_MCP_CONNECTOR_ID!,
+      userMcpToken,
+      task,
+    });
+  }
+
+  const { runId, events } = chatStream;
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -637,14 +658,7 @@ async function handleViaAgentsWeb(params: {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
       };
       try {
-        for await (const event of streamAgentChat({
-          agentsWebUrl: AGENTS_WEB_URL!,
-          apiKey: AGENTS_WEB_API_KEY!,
-          agentId: CHAT_AGENT_ID!,
-          connectorId: TRAVELBUDDY_MCP_CONNECTOR_ID!,
-          userMcpToken,
-          task,
-        })) {
+        for await (const event of events) {
           send(event);
         }
       } catch (err) {
@@ -656,7 +670,12 @@ async function handleViaAgentsWeb(params: {
   });
 
   return new Response(stream, {
-    headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      ...(runId && { 'X-Agent-Run-Id': runId }),
+    },
   });
 }
 

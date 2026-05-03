@@ -185,6 +185,7 @@ export function TripChatPanel({
   const hasMutationsRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const agentRunIdRef = useRef<string | null>(null);
 
   // Scroll to bottom when messages update
   useEffect(() => {
@@ -208,7 +209,8 @@ export function TripChatPanel({
     const userMsgId = nanoid(8);
     const assistantMsgId = nanoid(8);
 
-    // Snapshot history before adding the new user message
+    // Snapshot history — only the new user message is needed for continued runs,
+    // but we always include it so the fallback (direct-Claude) path still works.
     const historyMessages = messages.map((m) => ({ role: m.role, content: m.content }));
     historyMessages.push({ role: 'user' as const, content: text });
 
@@ -231,7 +233,11 @@ export function TripChatPanel({
       const res = await fetch(`/api/trips/${tripId}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: historyMessages, currentDayIndex }),
+        body: JSON.stringify({
+          messages: historyMessages,
+          currentDayIndex,
+          ...(agentRunIdRef.current && { agentRunId: agentRunIdRef.current }),
+        }),
         signal: abort.signal,
       });
 
@@ -239,6 +245,9 @@ export function TripChatPanel({
         throw new Error(`Request failed: ${res.status}`);
       }
       if (!res.body) throw new Error('No response body');
+
+      const runId = res.headers.get('X-Agent-Run-Id');
+      if (runId) agentRunIdRef.current = runId;
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
