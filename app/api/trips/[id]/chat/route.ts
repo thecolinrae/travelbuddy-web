@@ -608,22 +608,25 @@ async function handleViaAgentsWeb(params: {
   const { userId, tripId, trip, body } = params;
   const { messages: clientMessages, currentDayIndex } = body;
 
-  const [timeline, activitiesData] = await Promise.all([
-    loadTimeline(tripId),
-    loadActivities(tripId),
-  ]);
+  const destinations = trip.destinations.length > 0 ? trip.destinations : [trip.destination].filter(Boolean);
+  const days: string[] = [];
+  if (trip.startDate && currentDayIndex >= 0) {
+    const d = new Date(trip.startDate + 'T12:00:00');
+    d.setDate(d.getDate() + currentDayIndex);
+    days.push(d.toISOString().slice(0, 10));
+  }
 
-  const { systemPrompt } = buildTripContext({
-    trip,
-    timeline,
-    activities: activitiesData?.savedActivities ?? [],
-    currentDayIndex,
-  });
+  const contextLines = [
+    `Trip ID: ${tripId}`,
+    `Destinations: ${destinations.join(', ') || 'unknown'}`,
+    `Dates: ${trip.startDate ?? '?'} → ${trip.endDate ?? '?'}`,
+    ...(days.length > 0 ? [`Currently viewing: ${days[0]}`] : []),
+  ];
 
   const conversationLines = clientMessages.map(
     (m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`,
   );
-  const task = `${systemPrompt}\n\n---\n\n## Conversation\n\n${conversationLines.join('\n\n')}`;
+  const task = `## Trip\n${contextLines.join('\n')}\n\n## Conversation\n\n${conversationLines.join('\n\n')}`;
 
   const userMcpToken = generateMcpToken(userId);
   const encoder = new TextEncoder();
