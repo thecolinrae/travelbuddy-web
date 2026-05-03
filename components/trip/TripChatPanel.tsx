@@ -37,6 +37,7 @@ interface TripChatPanelProps {
   isOpen: boolean;
   onClose: () => void;
   currentDayIndex: number;
+  currentDate: string | null;
   onActivityMutation: () => void;
 }
 
@@ -176,6 +177,7 @@ export function TripChatPanel({
   isOpen,
   onClose,
   currentDayIndex,
+  currentDate,
   onActivityMutation,
 }: TripChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -236,6 +238,7 @@ export function TripChatPanel({
         body: JSON.stringify({
           messages: historyMessages,
           currentDayIndex,
+          currentDate,
           ...(agentRunIdRef.current && { agentRunId: agentRunIdRef.current }),
         }),
         signal: abort.signal,

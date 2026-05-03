@@ -21,6 +21,7 @@ import type { TripRow } from '@/services/db';
 interface ChatRequest {
   messages: { role: 'user' | 'assistant'; content: string }[];
   currentDayIndex: number;
+  currentDate?: string | null;
   agentRunId?: string;
 }
 
@@ -607,7 +608,7 @@ async function handleViaAgentsWeb(params: {
   body: ChatRequest;
 }): Promise<Response> {
   const { userId, tripId, trip, body } = params;
-  const { messages: clientMessages, currentDayIndex, agentRunId } = body;
+  const { messages: clientMessages, currentDayIndex, currentDate, agentRunId } = body;
 
   const userMcpToken = generateMcpToken(userId);
 
@@ -622,18 +623,12 @@ async function handleViaAgentsWeb(params: {
     });
   } else {
     const destinations = trip.destinations.length > 0 ? trip.destinations : [trip.destination].filter(Boolean);
-    let viewingDate: string | null = null;
-    if (trip.startDate && currentDayIndex >= 0) {
-      const d = new Date(trip.startDate + 'T12:00:00');
-      d.setDate(d.getDate() + currentDayIndex);
-      viewingDate = d.toISOString().slice(0, 10);
-    }
 
     const contextLines = [
       `Trip ID: ${tripId}`,
       `Destinations: ${destinations.join(', ') || 'unknown'}`,
       `Dates: ${trip.startDate ?? '?'} → ${trip.endDate ?? '?'}`,
-      ...(viewingDate ? [`Currently viewing: ${viewingDate}`] : []),
+      ...(currentDate ? [`Currently viewing: ${currentDate}`] : []),
     ];
 
     const lastUserMessage = clientMessages.filter((m) => m.role === 'user').at(-1)?.content ?? '';

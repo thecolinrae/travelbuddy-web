@@ -408,6 +408,7 @@ export function TripDetailClient({
         isOpen={chatOpen}
         onClose={() => setChatOpen(false)}
         currentDayIndex={dayIndex}
+        currentDate={days[dayIndex] ?? null}
         onActivityMutation={handleActivityMutation}
       />
 
