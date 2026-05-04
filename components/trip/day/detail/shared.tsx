@@ -6,12 +6,12 @@ export { fmt12, fmtUtc, tzAbbr };
 
 export const TRANSPORT_ICONS: Record<TransportType, React.ComponentType<{ className?: string }>> = {
   bus: Bus, train: Train, ferry: Ship,
-  car_rental: Car, taxi: Car, rideshare: Car, other: Navigation,
+  car_rental: Car, taxi: Car, rideshare: Car, drive: Car, other: Navigation,
 };
 
 export const TRANSPORT_LABELS: Record<TransportType, string> = {
   bus: 'Bus', train: 'Train', ferry: 'Ferry',
-  car_rental: 'Car rental', taxi: 'Taxi', rideshare: 'Rideshare', other: 'Transport',
+  car_rental: 'Car rental', taxi: 'Taxi', rideshare: 'Rideshare', drive: 'Drive', other: 'Transport',
 };
 
 export function SectionLabel({ children }: { children: React.ReactNode }) {
