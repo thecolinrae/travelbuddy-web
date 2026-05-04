@@ -625,6 +625,7 @@ function extractEvents(
       if (artifact.amount && artifact.amount > 0) {
         const cost = makeCost(artifact.amount, artifact.currency ?? preferredCurrency, preferredCurrency, rates);
         const transportLabel = tType === 'car_rental' ? 'Car rental'
+          : tType === 'drive' ? 'Drive'
           : tType === 'bus' ? 'Bus'
           : tType === 'train' ? 'Train'
           : tType === 'ferry' ? 'Ferry'

@@ -204,7 +204,7 @@ export interface FlightConnectionEvent extends BaseTimelineEvent {
   bookingRef?: string;
 }
 
-export type TransportType = 'bus' | 'train' | 'ferry' | 'car_rental' | 'taxi' | 'rideshare' | 'other';
+export type TransportType = 'bus' | 'train' | 'ferry' | 'car_rental' | 'drive' | 'taxi' | 'rideshare' | 'other';
 
 export interface TransportDepartureEvent extends BaseTimelineEvent {
   type: 'otherTransportation';

@@ -61,6 +61,7 @@ export function TransportFields({ form }: { form: EventFormState }) {
             <option value="train">Train</option>
             <option value="ferry">Ferry</option>
             <option value="car_rental">Car rental</option>
+            <option value="drive">Drive (own car)</option>
             <option value="taxi">Taxi</option>
             <option value="rideshare">Rideshare</option>
             <option value="other">Other</option>

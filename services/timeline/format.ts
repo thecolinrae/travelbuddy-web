@@ -42,6 +42,7 @@ export function normalizeBudgetCategory(category: string): BudgetItemCategory {
     train: 'transport',
     ferry: 'transport',
     rideshare: 'transport',
+    drive: 'transport',
     food: 'food',
     dining: 'food',
     restaurant: 'food',
@@ -160,6 +161,7 @@ export function formatTimeline(events: TimelineEvent[]): string {
       case 'otherTransportation': {
         const typeLabel = ({
           car_rental: '🚗 CAR RENTAL',
+          drive: '🚗 DRIVE',
           bus: '🚌 BUS',
           train: '🚆 TRAIN',
           ferry: '⛴️ FERRY',
