@@ -600,7 +600,6 @@ async function executeTool(
 const AGENTS_WEB_URL = process.env.AGENTS_WEB_URL?.trim();
 const CHAT_AGENT_ID = process.env.CHAT_AGENT_ID?.trim();
 const AGENTS_WEB_API_KEY = process.env.AGENTS_WEB_API_KEY?.trim();
-const TRAVELBUDDY_MCP_CONNECTOR_ID = process.env.TRAVELBUDDY_MCP_CONNECTOR_ID?.trim();
 
 async function handleViaAgentsWeb(params: {
   userId: string;
@@ -621,7 +620,6 @@ async function handleViaAgentsWeb(params: {
       apiKey: AGENTS_WEB_API_KEY!,
       runId: agentRunId,
       message: latestMessage,
-      connectorId: TRAVELBUDDY_MCP_CONNECTOR_ID!,
       userMcpToken,
     });
   } else {
@@ -641,7 +639,6 @@ async function handleViaAgentsWeb(params: {
       agentsWebUrl: AGENTS_WEB_URL!,
       apiKey: AGENTS_WEB_API_KEY!,
       agentId: CHAT_AGENT_ID!,
-      connectorId: TRAVELBUDDY_MCP_CONNECTOR_ID!,
       userMcpToken,
       task,
     });
@@ -685,7 +682,7 @@ export const POST = withTripAuth(async ({ userId, trip, params, request }) => {
 
   const body = (await request.json()) as ChatRequest;
 
-  if (AGENTS_WEB_URL && CHAT_AGENT_ID && AGENTS_WEB_API_KEY && TRAVELBUDDY_MCP_CONNECTOR_ID) {
+  if (AGENTS_WEB_URL && CHAT_AGENT_ID && AGENTS_WEB_API_KEY) {
     return handleViaAgentsWeb({ userId, tripId, trip, body });
   }
 

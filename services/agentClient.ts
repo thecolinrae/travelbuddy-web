@@ -42,7 +42,6 @@ export interface AgentChatParams {
   agentsWebUrl: string;
   apiKey: string;
   agentId: string;
-  connectorId: string;
   userMcpToken: string;
   task: string;
 }
@@ -52,7 +51,6 @@ export interface AgentContinueParams {
   apiKey: string;
   runId: string;
   message: string;
-  connectorId?: string;
   userMcpToken?: string;
 }
 
@@ -61,7 +59,7 @@ export async function streamAgentChat(
   params: AgentChatParams,
   signal?: AbortSignal,
 ): Promise<AgentChatStream> {
-  const { agentsWebUrl, apiKey, agentId, connectorId, userMcpToken, task } = params;
+  const { agentsWebUrl, apiKey, agentId, userMcpToken, task } = params;
 
   const response = await fetch(`${agentsWebUrl}/api/v1/runs`, {
     method: 'POST',
@@ -70,7 +68,7 @@ export async function streamAgentChat(
       agentId,
       task,
       connectorHeaderOverrides: {
-        [connectorId]: { Authorization: `Bearer ${userMcpToken}` },
+        '*': { Authorization: `Bearer ${userMcpToken}` },
       },
     }),
     signal,
@@ -85,11 +83,11 @@ export async function continueAgentChat(
   params: AgentContinueParams,
   signal?: AbortSignal,
 ): Promise<AgentChatStream> {
-  const { agentsWebUrl, apiKey, runId, message, connectorId, userMcpToken } = params;
+  const { agentsWebUrl, apiKey, runId, message, userMcpToken } = params;
 
   const body: Record<string, unknown> = { message };
-  if (connectorId && userMcpToken) {
-    body.connectorHeaderOverrides = { [connectorId]: { Authorization: `Bearer ${userMcpToken}` } };
+  if (userMcpToken) {
+    body.connectorHeaderOverrides = { '*': { Authorization: `Bearer ${userMcpToken}` } };
   }
 
   const response = await fetch(`${agentsWebUrl}/api/v1/runs/${runId}/continue`, {
