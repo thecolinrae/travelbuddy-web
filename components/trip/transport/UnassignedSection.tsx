@@ -20,6 +20,7 @@ const TRANSPORT_ICONS: Record<TransportType, React.ComponentType<{ className?: s
   train: Train,
   ferry: Ship,
   car_rental: Car,
+  drive: Car,
   taxi: Car,
   rideshare: Car,
   other: Navigation,
