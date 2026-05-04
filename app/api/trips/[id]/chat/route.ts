@@ -621,6 +621,8 @@ async function handleViaAgentsWeb(params: {
       apiKey: AGENTS_WEB_API_KEY!,
       runId: agentRunId,
       message: latestMessage,
+      connectorId: TRAVELBUDDY_MCP_CONNECTOR_ID!,
+      userMcpToken,
     });
   } else {
     const destinations = trip.destinations.length > 0 ? trip.destinations : [trip.destination].filter(Boolean);

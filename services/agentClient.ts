@@ -52,6 +52,8 @@ export interface AgentContinueParams {
   apiKey: string;
   runId: string;
   message: string;
+  connectorId?: string;
+  userMcpToken?: string;
 }
 
 /** Creates a new agents-web run and streams its events. */
@@ -83,12 +85,17 @@ export async function continueAgentChat(
   params: AgentContinueParams,
   signal?: AbortSignal,
 ): Promise<AgentChatStream> {
-  const { agentsWebUrl, apiKey, runId, message } = params;
+  const { agentsWebUrl, apiKey, runId, message, connectorId, userMcpToken } = params;
+
+  const body: Record<string, unknown> = { message };
+  if (connectorId && userMcpToken) {
+    body.connectorHeaderOverrides = { [connectorId]: { Authorization: `Bearer ${userMcpToken}` } };
+  }
 
   const response = await fetch(`${agentsWebUrl}/api/v1/runs/${runId}/continue`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify(body),
     signal,
   });
 
