@@ -1,17 +1,27 @@
 /**
  * Destination cover photo service.
  *
- * Primary source: Unsplash API (requires UNSPLASH_ACCESS_KEY).
+ * Primary source: Unsplash API (key fetched from auth-hub: unsplash_access_key).
  * Fallback source: Wikipedia page summary (no API key, upload.wikimedia.org).
  *
  * Server-side only — never import in client components.
  */
 
+import { getSecret } from '@/lib/auth-hub';
+
+async function getUnsplashKey(): Promise<string | null> {
+  try {
+    return await getSecret('unsplash_access_key');
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Try Unsplash first. Returns a landscape photo URL or null.
  */
 async function fetchFromUnsplash(destination: string): Promise<string | null> {
-  const accessKey = process.env.UNSPLASH_ACCESS_KEY;
+  const accessKey = await getUnsplashKey();
   if (!accessKey) return null;
 
   const url =
@@ -66,7 +76,7 @@ export async function fetchDestinationPhotos(
 
   // Unsplash: fetch several landscape options in one request
   try {
-    const accessKey = process.env.UNSPLASH_ACCESS_KEY;
+    const accessKey = await getUnsplashKey();
     if (accessKey) {
       const url =
         `https://api.unsplash.com/search/photos` +

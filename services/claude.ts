@@ -1,7 +1,7 @@
 /**
  * Claude API service (web / server-side).
  *
- * API key is read from ANTHROPIC_API_KEY environment variable.
+ * API key is fetched from auth-hub (GlobalSecret: anthropic_api_key).
  * All functions must be called server-side (Next.js API routes / Server Actions).
  *
  * File reading (PDF/image base64) is handled by the caller before invoking these
@@ -9,6 +9,7 @@
  */
 
 import type { ParseResult, Activity, ActivityType } from '@/types';
+import { getSecret } from '@/lib/auth-hub';
 
 const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
 const MODEL_PARSE = 'claude-haiku-4-5-20251001';
@@ -21,18 +22,12 @@ type ContentBlock =
 
 const MAX_RETRIES = 3;
 
-function getApiKey(): string {
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) throw new Error('ANTHROPIC_API_KEY environment variable is not set');
-  return key;
-}
-
 async function callClaude(
   system: string,
   userContent: ContentBlock[] | string,
   model: string = MODEL_GENERATE,
 ): Promise<string> {
-  const apiKey = getApiKey();
+  const apiKey = await getSecret('anthropic_api_key');
   let attempt = 0;
 
   while (true) {

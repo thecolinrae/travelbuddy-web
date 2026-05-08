@@ -1,16 +1,17 @@
 import { auth } from '@/lib/auth';
+import { getUserGoogleToken } from '@/lib/auth-hub';
 import { fetchGmailLabels } from '@/services/gmail';
 
 export async function GET() {
   const session = await auth();
-  if (!(session as { accessToken?: string })?.accessToken) {
+  const userId = (session as { userId?: string } | null)?.userId;
+  if (!userId) {
     return Response.json({ error: 'Not authenticated' }, { status: 401 });
   }
 
   try {
-    const labels = await fetchGmailLabels(
-      (session as { accessToken: string }).accessToken,
-    );
+    const accessToken = await getUserGoogleToken(userId);
+    const labels = await fetchGmailLabels(accessToken);
     return Response.json({ labels });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to fetch Gmail labels';

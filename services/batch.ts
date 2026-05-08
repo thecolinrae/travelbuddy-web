@@ -13,9 +13,13 @@ import Anthropic from '@anthropic-ai/sdk';
 import { prisma } from '@/lib/prisma';
 import { loadActivities, saveActivities } from './db';
 import { filterOpenPlaces } from './places';
+import { getSecret } from '@/lib/auth-hub';
 import type { Activity } from '@/types';
 
-const client = new Anthropic(); // reads ANTHROPIC_API_KEY
+async function getClient(): Promise<Anthropic> {
+  const apiKey = await getSecret('anthropic_api_key');
+  return new Anthropic({ apiKey });
+}
 
 const MODEL = 'claude-sonnet-4-6';
 
@@ -77,7 +81,7 @@ export async function submitActivityBatch(
     },
   }));
 
-  const batch = await client.messages.batches.create({ requests });
+  const batch = await (await getClient()).messages.batches.create({ requests });
 
   const job = await prisma.batchJob.create({
     data: {
@@ -103,7 +107,8 @@ export async function processBatchResults(jobId: string): Promise<void> {
   const job = await prisma.batchJob.findUnique({ where: { id: jobId } });
   if (!job || job.status === 'completed' || job.status === 'failed') return;
 
-  const batch = await client.messages.batches.retrieve(job.anthropicBatchId);
+  const c = await getClient();
+  const batch = await c.messages.batches.retrieve(job.anthropicBatchId);
 
   if (batch.processing_status === 'in_progress') {
     // Mark processing so future polls know it's been seen
@@ -117,7 +122,7 @@ export async function processBatchResults(jobId: string): Promise<void> {
 
   // Collect results
   const allNew: Activity[] = [];
-  for await (const result of await client.messages.batches.results(job.anthropicBatchId)) {
+  for await (const result of await c.messages.batches.results(job.anthropicBatchId)) {
     if (result.result.type !== 'succeeded') continue;
     const dest = result.custom_id;
     const text = result.result.message.content

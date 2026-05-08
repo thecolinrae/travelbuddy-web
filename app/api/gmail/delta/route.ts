@@ -1,14 +1,14 @@
 import { auth } from '@/lib/auth';
+import { getUserGoogleToken } from '@/lib/auth-hub';
 import { getTrip, getImportedGmailIds } from '@/services/db';
 import { searchTravelEmails } from '@/services/gmail';
 import { prisma } from '@/lib/prisma';
 
 export async function GET(request: Request) {
   const session = await auth();
-  const userId = (session as { userId?: string; accessToken?: string } | null)?.userId;
-  const accessToken = (session as { accessToken?: string } | null)?.accessToken;
+  const userId = (session as { userId?: string } | null)?.userId;
 
-  if (!userId || !accessToken) {
+  if (!userId) {
     return Response.json({ error: 'Not authenticated' }, { status: 401 });
   }
 
@@ -26,6 +26,7 @@ export async function GET(request: Request) {
   }
 
   try {
+    const accessToken = await getUserGoogleToken(userId);
     const [importedIds, allMessages] = await Promise.all([
       getImportedGmailIds(tripId, labelId),
       searchTravelEmails(accessToken, 100, { labelId, fetchAll: true }),
@@ -33,7 +34,6 @@ export async function GET(request: Request) {
 
     const newMessages = allMessages.filter((m) => !importedIds.has(m.id));
 
-    // Resolve label name from the DB (already stored from original import)
     const labelRow = await prisma.artifact.findFirst({
       where: { tripId, gmailLabelId: labelId },
       select: { gmailLabelName: true },

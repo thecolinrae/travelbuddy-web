@@ -1,9 +1,11 @@
 import { auth } from '@/lib/auth';
+import { getUserGoogleToken } from '@/lib/auth-hub';
 import { searchTravelEmails } from '@/services/gmail';
 
 export async function GET(request: Request) {
   const session = await auth();
-  if (!(session as { accessToken?: string })?.accessToken) {
+  const userId = (session as { userId?: string } | null)?.userId;
+  if (!userId) {
     return Response.json({ error: 'Not authenticated' }, { status: 401 });
   }
 
@@ -11,8 +13,9 @@ export async function GET(request: Request) {
   const labelId = searchParams.get('labelId') ?? undefined;
 
   try {
+    const accessToken = await getUserGoogleToken(userId);
     const messages = await searchTravelEmails(
-      (session as { accessToken: string }).accessToken,
+      accessToken,
       100,
       labelId ? { labelId, fetchAll: true } : undefined,
     );
