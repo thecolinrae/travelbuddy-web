@@ -42,7 +42,7 @@ export interface AgentChatParams {
   agentsWebUrl: string;
   apiKey: string;
   agentId: string;
-  userMcpToken: string;
+  userId: string;
   task: string;
 }
 
@@ -51,7 +51,6 @@ export interface AgentContinueParams {
   apiKey: string;
   runId: string;
   message: string;
-  userMcpToken?: string;
 }
 
 /** Creates a new agents-web run and streams its events. */
@@ -59,18 +58,12 @@ export async function streamAgentChat(
   params: AgentChatParams,
   signal?: AbortSignal,
 ): Promise<AgentChatStream> {
-  const { agentsWebUrl, apiKey, agentId, userMcpToken, task } = params;
+  const { agentsWebUrl, apiKey, agentId, userId, task } = params;
 
   const response = await fetch(`${agentsWebUrl}/api/v1/runs`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      agentId,
-      task,
-      connectorHeaderOverrides: {
-        '*': { Authorization: `Bearer ${userMcpToken}` },
-      },
-    }),
+    body: JSON.stringify({ agentId, task, runAsUserId: userId }),
     signal,
   });
 
@@ -83,17 +76,12 @@ export async function continueAgentChat(
   params: AgentContinueParams,
   signal?: AbortSignal,
 ): Promise<AgentChatStream> {
-  const { agentsWebUrl, apiKey, runId, message, userMcpToken } = params;
-
-  const body: Record<string, unknown> = { message };
-  if (userMcpToken) {
-    body.connectorHeaderOverrides = { '*': { Authorization: `Bearer ${userMcpToken}` } };
-  }
+  const { agentsWebUrl, apiKey, runId, message } = params;
 
   const response = await fetch(`${agentsWebUrl}/api/v1/runs/${runId}/continue`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ message }),
     signal,
   });
 

@@ -12,7 +12,6 @@ import { filterOpenPlaces, verifyPlaceAddress } from '@/services/places';
 import { nanoid } from '@/services/nanoid';
 import { enrichIfMissingAddress } from '@/services/activityEnrich';
 import { streamAgentChat, continueAgentChat } from '@/services/agentClient';
-import { generateMcpToken } from '@/lib/mcp-token';
 import type { Activity, ActivityType, BudgetItemCategory, TimelineEvent } from '@/types';
 import type { TripRow } from '@/services/db';
 
@@ -610,8 +609,6 @@ async function handleViaAgentsWeb(params: {
   const { userId, tripId, trip, body } = params;
   const { messages: clientMessages, currentDayIndex, currentDate, agentRunId } = body;
 
-  const userMcpToken = generateMcpToken(userId);
-
   let chatStream;
   if (agentRunId) {
     const latestMessage = clientMessages.filter((m) => m.role === 'user').at(-1)?.content ?? '';
@@ -620,7 +617,6 @@ async function handleViaAgentsWeb(params: {
       apiKey: AGENTS_WEB_API_KEY!,
       runId: agentRunId,
       message: latestMessage,
-      userMcpToken,
     });
   } else {
     const destinations = trip.destinations.length > 0 ? trip.destinations : [trip.destination].filter(Boolean);
@@ -639,7 +635,7 @@ async function handleViaAgentsWeb(params: {
       agentsWebUrl: AGENTS_WEB_URL!,
       apiKey: AGENTS_WEB_API_KEY!,
       agentId: CHAT_AGENT_ID!,
-      userMcpToken,
+      userId,
       task,
     });
   }
