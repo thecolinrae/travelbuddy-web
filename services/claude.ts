@@ -393,7 +393,7 @@ export async function streamTripChat(
   tools: ChatToolDefinition[],
   onEvent: (event: ChatStreamEvent) => void,
 ): Promise<void> {
-  const apiKey = getApiKey();
+  const apiKey = await getSecret('anthropic_api_key');
   let attempt = 0;
 
   while (true) {
