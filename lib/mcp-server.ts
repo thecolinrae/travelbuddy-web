@@ -65,8 +65,6 @@ function eventSummary(e: TimelineEvent): string {
       return `Expense: ${(e as ExpenseEvent).description}`;
     case 'activity':
       return `Activity: ${(e as ActivityEvent).description}`;
-    default:
-      return e.type;
   }
 }
 
