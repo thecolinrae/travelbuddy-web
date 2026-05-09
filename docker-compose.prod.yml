@@ -23,6 +23,7 @@ services:
     ports: []               # Caddy handles external traffic; no direct exposure
     environment:
       NODE_ENV: production
+      AUTH_URL: https://travelbuddy.screwball.ca
     networks:
       default: {}           # can still reach storage on the app-local network
       proxy: {}             # Caddy and homelab_db can reach this container
