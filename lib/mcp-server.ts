@@ -6,6 +6,8 @@ import {
   createTrip,
   updateTrip,
   loadTimeline,
+  loadTimelineWindow,
+  getTimelineEventByDataId,
   saveTimeline,
   loadActivities,
   saveActivities,
@@ -17,7 +19,20 @@ import { enrichIfMissingAddress } from '@/services/activityEnrich';
 import { verifyPlaceAddress } from '@/services/places';
 import { nanoid } from '@/services/nanoid';
 import { makeCost, fetchRatesFromPreferred } from '@/services/currency';
-import type { Activity, ActivityType, BudgetItemCategory, Cost, ExpenseEvent, TimelineEvent } from '@/types';
+import type {
+  Activity,
+  ActivityEvent,
+  ActivityType,
+  BudgetItemCategory,
+  Cost,
+  ExpenseEvent,
+  FlightArrivalEvent,
+  FlightConnectionEvent,
+  FlightDepartureEvent,
+  HotelCheckInEvent,
+  TimelineEvent,
+  TransportDepartureEvent,
+} from '@/types';
 
 function ok(data: unknown) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
@@ -25,6 +40,34 @@ function ok(data: unknown) {
 
 function fail(message: string) {
   return { content: [{ type: 'text' as const, text: message }], isError: true };
+}
+
+function offsetDate(dateStr: string, days: number): string {
+  const d = new Date(dateStr + 'T12:00:00Z');
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function eventSummary(e: TimelineEvent): string {
+  switch (e.type) {
+    case 'flight':
+      if (e.subtype === 'departure') {
+        const f = e as FlightDepartureEvent;
+        return `Flight ${f.flightNo} ${f.departureAirport} → ${f.arrivalAirport}`;
+      }
+      if (e.subtype === 'arrival') return `Arrives ${(e as FlightArrivalEvent).arrivalAirport}`;
+      return `Connection at ${(e as FlightConnectionEvent).connectionAirport}`;
+    case 'hotel':
+      return `${e.subtype === 'check_in' ? 'Check-in' : 'Check-out'} ${(e as HotelCheckInEvent).hotelName}`;
+    case 'otherTransportation':
+      return `${e.subtype === 'departure' ? 'Departs' : 'Arrives'} ${(e as TransportDepartureEvent).departureLocation ?? e.locationCity}`;
+    case 'expense':
+      return `Expense: ${(e as ExpenseEvent).description}`;
+    case 'activity':
+      return `Activity: ${(e as ActivityEvent).description}`;
+    default:
+      return e.type;
+  }
 }
 
 export function createMcpServer(userId: string): McpServer {
@@ -51,13 +94,60 @@ export function createMcpServer(userId: string): McpServer {
   );
 
   server.registerTool(
-    'get_timeline',
+    'get_timeline_summary',
     {
-      description: 'Get all timeline events (flights, hotels, transport, expenses, activities) for a trip.',
+      description: 'Get a compact day-by-day summary of a trip timeline — dates, cities visited, and one-liner per event. Use this to orient yourself before calling get_timeline with a specific date.',
       inputSchema: { tripId: z.string() },
     },
     async ({ tripId }) => {
       if (!await getTrip(tripId, userId)) return fail('Trip not found or not accessible');
+      const events = await loadTimeline(tripId);
+      const byDate = new Map<string, { cities: Set<string>; events: { type: string; summary: string }[] }>();
+      for (const e of events) {
+        const key = e.date ?? 'undated';
+        if (!byDate.has(key)) byDate.set(key, { cities: new Set(), events: [] });
+        const bucket = byDate.get(key)!;
+        if (e.locationCity) bucket.cities.add(e.locationCity);
+        bucket.events.push({ type: e.type, summary: eventSummary(e) });
+      }
+      const summary = [...byDate.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([date, { cities, events: evts }]) => ({
+          date,
+          cities: [...cities],
+          events: evts,
+        }));
+      return ok(summary);
+    },
+  );
+
+  server.registerTool(
+    'get_timeline',
+    {
+      description:
+        'Get timeline events for a trip. Provide date, eventId, or startDate+endDate for a focused window (strongly preferred — full timelines can be very large). Omit all filters only as a last resort.',
+      inputSchema: {
+        tripId: z.string(),
+        date: z.string().optional().describe('YYYY-MM-DD anchor date — returns events ±1 day around this date.'),
+        eventId: z.string().optional().describe('Event ID — returns events ±1 day around that event\'s date.'),
+        startDate: z.string().optional().describe('YYYY-MM-DD explicit range start (use with endDate).'),
+        endDate: z.string().optional().describe('YYYY-MM-DD explicit range end (use with startDate).'),
+      },
+    },
+    async ({ tripId, date, eventId, startDate, endDate }) => {
+      if (!await getTrip(tripId, userId)) return fail('Trip not found or not accessible');
+      if (eventId) {
+        const event = await getTimelineEventByDataId(tripId, eventId);
+        if (!event) return fail('Event not found');
+        if (!event.date) return ok([event]);
+        return ok(await loadTimelineWindow(tripId, offsetDate(event.date, -1), offsetDate(event.date, 1)));
+      }
+      if (date) {
+        return ok(await loadTimelineWindow(tripId, offsetDate(date, -1), offsetDate(date, 1)));
+      }
+      if (startDate && endDate) {
+        return ok(await loadTimelineWindow(tripId, startDate, endDate));
+      }
       return ok(await loadTimeline(tripId));
     },
   );

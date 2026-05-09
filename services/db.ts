@@ -191,6 +191,21 @@ export async function loadTimeline(tripId: string): Promise<TimelineEvent[]> {
   }));
 }
 
+export async function loadTimelineWindow(
+  tripId: string,
+  startDate: string,
+  endDate: string,
+): Promise<TimelineEvent[]> {
+  const rows = await prisma.timelineEvent.findMany({
+    where: { tripId, eventDate: { gte: startDate, lte: endDate } },
+    orderBy: [{ sortUtc: 'asc' }, { eventDate: 'asc' }],
+  });
+  return rows.map((r) => ({
+    ...(r.data as unknown as TimelineEvent),
+    legId: r.legId ?? undefined,
+  }));
+}
+
 // ─── Activities ───────────────────────────────────────────────────────────────
 
 export async function saveActivities(
