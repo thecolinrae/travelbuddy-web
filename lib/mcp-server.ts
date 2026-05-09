@@ -153,12 +153,42 @@ export function createMcpServer(userId: string): McpServer {
   server.registerTool(
     'get_activities',
     {
-      description: 'Get the activity pool for a trip.',
-      inputSchema: { tripId: z.string() },
+      description:
+        'Get unscheduled activities for a specific city in a trip. ' +
+        'Use get_scheduled_activities to see what is planned for a specific day. ' +
+        'Do NOT call this to find activities already on the itinerary.',
+      inputSchema: {
+        tripId: z.string(),
+        city: z.string().describe('Only return unscheduled activities for this city'),
+      },
     },
-    async ({ tripId }) => {
+    async ({ tripId, city }) => {
       if (!await getTrip(tripId, userId)) return fail('Trip not found or not accessible');
-      return ok(await loadActivities(tripId) ?? { destination: '', savedActivities: [] });
+      const result = await loadActivities(tripId) ?? { destination: '', savedActivities: [] };
+      const cityLower = city.toLowerCase();
+      const unscheduled = result.savedActivities.filter(
+        a => !a.scheduledDate && a.city?.toLowerCase() === cityLower,
+      );
+      return ok({ destination: result.destination, savedActivities: unscheduled });
+    },
+  );
+
+  server.registerTool(
+    'get_scheduled_activities',
+    {
+      description:
+        'Get activities scheduled on a specific date for a trip. ' +
+        'Prefer this over get_activities when you need to know what is planned for a day.',
+      inputSchema: {
+        tripId: z.string(),
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe('YYYY-MM-DD'),
+      },
+    },
+    async ({ tripId, date }) => {
+      if (!await getTrip(tripId, userId)) return fail('Trip not found or not accessible');
+      const result = await loadActivities(tripId);
+      const scheduled = (result?.savedActivities ?? []).filter(a => a.scheduledDate === date);
+      return ok(scheduled);
     },
   );
 
