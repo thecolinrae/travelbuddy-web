@@ -10,6 +10,11 @@
  * The hour range (e.g. 8am–8pm) is chosen by the caller before generating —
  * see AGENDA_MAX_HOURS below for the largest range that still fits within a
  * single half-page column without overflowing.
+ *
+ * An optional "booklet" mode reorders the physical pages into saddle-stitch
+ * signature order, so printing double-sided and folding the whole stack in
+ * half along the vertical centerline (then stapling the spine) produces a
+ * booklet that reads in the correct day order — see buildBookletPageSlots.
  */
 
 import type { TripExportPayload } from './json';
@@ -397,43 +402,79 @@ function agendaDayColumn(
   return items;
 }
 
+// ─── Booklet imposition ────────────────────────────────────────────────────────
+//
+// Fold-and-staple booklet printing needs the physical sheets in "signature"
+// order, not reading order: each landscape sheet holds 2 pages per side (4 per
+// sheet once printed double-sided), and folding a whole stack of them together
+// only reconstructs 1,2,3,4,... if the outermost sheet carries the first/last
+// pages, the next sheet in carries the next pair in from both ends, and so on.
+// This is the same imposition every "print as booklet" feature uses (Acrobat,
+// Word, pdfbook, ...): for sheet k of S = N/4 (1 = outermost), N = total pages
+// padded up to a multiple of 4 with trailing blanks:
+//   front: [N - 2k + 2, 2k - 1]      back: [2k, N - 2k + 1]
+
+function buildBookletPageSlots(numDays: number): Array<[number | null, number | null]> {
+  const N = Math.max(4, Math.ceil(numDays / 4) * 4);
+  const S = N / 4;
+  const slot = (p: number): number | null => (p <= numDays ? p - 1 : null); // p is 1-indexed; null = blank padding page
+  const pages: Array<[number | null, number | null]> = [];
+  for (let k = 1; k <= S; k++) {
+    pages.push([slot(N - 2 * k + 2), slot(2 * k - 1)]); // front
+    pages.push([slot(2 * k), slot(N - 2 * k + 1)]); // back
+  }
+  return pages;
+}
+
 // ─── Render entry point ───────────────────────────────────────────────────────
 
 export async function renderTripAgendaPdf(
   payload: TripExportPayload,
-  opts?: { startHour?: number; endHour?: number },
+  opts?: { startHour?: number; endHour?: number; booklet?: boolean },
 ): Promise<Buffer> {
   const { startHour, endHour } = clampHourRange(opts?.startHour, opts?.endHour);
   const contentDays = buildContentDays(payload);
 
   const pageContentW = PAGE_W - MARGIN * 2;
   const dayColW = (pageContentW - COL_GAP) / 2;
+  const leftX = MARGIN;
+  const rightX = MARGIN + dayColW + COL_GAP;
+  const y0 = MARGIN;
+
+  const renderPage = (left: ContentDay | null, right: ContentDay | null): Content[] => [
+    ...(left ? agendaDayColumn(left, leftX, y0, dayColW, startHour, endHour) : []),
+    ...(right ? agendaDayColumn(right, rightX, y0, dayColW, startHour, endHour) : []),
+  ];
 
   const items: Content[] = [];
 
   if (contentDays.length === 0) {
     items.push({ text: 'No scheduled days to display.', margin: [0, 60, 0, 0], alignment: 'center', color: C.muted } as Content);
-  }
-
-  for (let i = 0; i < contentDays.length; i += 2) {
-    const a = contentDays[i];
-    const b = contentDays[i + 1];
-
-    const leftX = MARGIN;
-    const rightX = MARGIN + dayColW + COL_GAP;
-    const y0 = MARGIN;
-
-    const colAItems = agendaDayColumn(a, leftX, y0, dayColW, startHour, endHour);
-    const colBItems = b ? agendaDayColumn(b, rightX, y0, dayColW, startHour, endHour) : [];
-
-    const pageItems = [...colAItems, ...colBItems];
-    if (i === 0) {
-      items.push(...pageItems);
-    } else {
-      // Force a page break before this pair's first item; the rest are plain
-      // absolute items and don't affect the flow cursor.
-      items.push(Object.assign({ text: '' } as object, { pageBreak: 'before' }) as Content);
-      items.push(...pageItems);
+  } else if (opts?.booklet) {
+    const pageSlots = buildBookletPageSlots(contentDays.length);
+    pageSlots.forEach(([leftIdx, rightIdx], pageIndex) => {
+      const pageItems = renderPage(
+        leftIdx !== null ? contentDays[leftIdx] : null,
+        rightIdx !== null ? contentDays[rightIdx] : null,
+      );
+      if (pageIndex === 0) {
+        items.push(...pageItems);
+      } else {
+        items.push(Object.assign({ text: '' } as object, { pageBreak: 'before' }) as Content);
+        items.push(...pageItems);
+      }
+    });
+  } else {
+    for (let i = 0; i < contentDays.length; i += 2) {
+      const pageItems = renderPage(contentDays[i], contentDays[i + 1] ?? null);
+      if (i === 0) {
+        items.push(...pageItems);
+      } else {
+        // Force a page break before this pair's first item; the rest are plain
+        // absolute items and don't affect the flow cursor.
+        items.push(Object.assign({ text: '' } as object, { pageBreak: 'before' }) as Content);
+        items.push(...pageItems);
+      }
     }
   }
 

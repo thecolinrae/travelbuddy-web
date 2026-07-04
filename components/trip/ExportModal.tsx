@@ -5,6 +5,7 @@ import { Download, FileText, FileArchive, BookOpen, CalendarClock, Loader2 } fro
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Select } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
 import {
   Dialog,
   DialogContent,
@@ -80,6 +81,7 @@ export function ExportModal({ open, onClose, tripId, tripName }: Props) {
   const [loading, setLoading] = useState<Format | null>(null);
   const [agendaStart, setAgendaStart] = useState(8);
   const [agendaEnd, setAgendaEnd] = useState(20);
+  const [agendaBooklet, setAgendaBooklet] = useState(false);
 
   const maxEnd = Math.min(24, agendaStart + AGENDA_MAX_HOURS);
   const endOptions = Array.from({ length: maxEnd - agendaStart }, (_, i) => agendaStart + i + 1);
@@ -93,7 +95,9 @@ export function ExportModal({ open, onClose, tripId, tripName }: Props) {
     if (loading) return;
     setLoading(format);
     try {
-      const query = format === 'agenda' ? `&startHour=${agendaStart}&endHour=${agendaEnd}` : '';
+      const query = format === 'agenda'
+        ? `&startHour=${agendaStart}&endHour=${agendaEnd}${agendaBooklet ? '&booklet=1' : ''}`
+        : '';
       const res = await fetch(`/api/trips/${tripId}/export?format=${format}${query}`);
       if (!res.ok) {
         const data = (await res.json()) as { error?: string };
@@ -106,7 +110,7 @@ export function ExportModal({ open, onClose, tripId, tripName }: Props) {
       const slug = tripName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
       const ext = format === 'zip' ? '.zip'
         : format === 'markdown' ? '.md'
-        : format === 'agenda' ? '-agenda.pdf'
+        : format === 'agenda' ? `-agenda${agendaBooklet ? '-booklet' : ''}.pdf`
         : '-binder.pdf';
       const filename = match?.[1] ?? `${slug}${ext}`;
 
@@ -184,6 +188,23 @@ export function ExportModal({ open, onClose, tripId, tripName }: Props) {
                         <option key={h} value={h}>{formatHourOption(h)}</option>
                       ))}
                     </Select>
+                  </div>
+                )}
+                {fmt.id === 'agenda' && (
+                  <div className="mt-2.5 flex items-start gap-2">
+                    <input
+                      id="agenda-booklet"
+                      type="checkbox"
+                      checked={agendaBooklet}
+                      onChange={(e) => setAgendaBooklet(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-gray-300"
+                    />
+                    <Label htmlFor="agenda-booklet" className="font-normal">
+                      <span className="block text-xs text-text-base">Print as booklet</span>
+                      <span className="block type-caption leading-relaxed">
+                        Reorders the pages for double-sided printing — fold the whole stack in half and staple the crease. Use your printer&apos;s &quot;flip on short edge&quot; duplex setting.
+                      </span>
+                    </Label>
                   </div>
                 )}
                 <div className="mt-3 flex justify-end">

@@ -7,6 +7,7 @@
  *   pdf      — Printable trip binder (cover, quick ref, daily itinerary, budget)
  *   agenda   — Printable landscape day-planner (2 days/page, hourly grid)
  *              optional ?startHour=8&endHour=20 to pick the displayed hour range
+ *              optional ?booklet=1 to reorder pages for double-sided fold+staple printing
  */
 
 import { withTripAuth, apiError } from '@/lib/api';
@@ -114,14 +115,16 @@ export const GET = withTripAuth(async ({ trip, params, request }) => {
       const searchParams = new URL(request.url).searchParams;
       const startHourParam = searchParams.get('startHour');
       const endHourParam = searchParams.get('endHour');
+      const booklet = searchParams.get('booklet') === '1';
       const pdfBuffer = await renderTripAgendaPdf(payload, {
         startHour: startHourParam !== null ? Number(startHourParam) : undefined,
         endHour: endHourParam !== null ? Number(endHourParam) : undefined,
+        booklet,
       });
       return new Response(new Uint8Array(pdfBuffer), {
         headers: {
           'Content-Type': 'application/pdf',
-          'Content-Disposition': `attachment; filename="${slug}-agenda.pdf"`,
+          'Content-Disposition': `attachment; filename="${slug}-agenda${booklet ? '-booklet' : ''}.pdf"`,
           'Content-Length': String(pdfBuffer.length),
         },
       });
