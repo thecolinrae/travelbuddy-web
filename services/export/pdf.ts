@@ -124,9 +124,12 @@ function fmtCurrency(amount: number, currency: string): string {
   return `$${amount.toFixed(2)} ${currency}`;
 }
 
-function buildDays(startDate: string | null, endDate: string | null, events: TimelineEvent[]): string[] {
-  const eventDates = new Set(events.map((e) => e.date.slice(0, 10)));
-  if (!startDate && !endDate) return Array.from(eventDates).sort();
+function buildDays(startDate: string | null, endDate: string | null, events: TimelineEvent[], activities: Activity[]): string[] {
+  const knownDates = new Set<string>([
+    ...events.map((e) => e.date.slice(0, 10)),
+    ...activities.filter((a) => a.scheduledDate).map((a) => a.scheduledDate!.slice(0, 10)),
+  ]);
+  if (!startDate && !endDate) return Array.from(knownDates).sort();
   const days: string[] = [];
   const start = new Date((startDate ?? endDate!) + 'T12:00:00');
   const end = new Date((endDate ?? startDate!) + 'T12:00:00');
@@ -135,7 +138,7 @@ function buildDays(startDate: string | null, endDate: string | null, events: Tim
     days.push(cursor.toISOString().slice(0, 10));
     cursor.setDate(cursor.getDate() + 1);
   }
-  for (const d of eventDates) if (!days.includes(d)) days.push(d);
+  for (const d of knownDates) if (!days.includes(d)) days.push(d);
   return days.sort();
 }
 
@@ -263,8 +266,8 @@ function buildContentDays(payload: TripExportPayload): Array<{
   dayActivities: Activity[];
 }> {
   const { trip, timeline, activities } = payload;
-  const days = buildDays(trip.startDate, trip.endDate, timeline);
   const scheduledActivities = activities.filter((a) => a.scheduledDate);
+  const days = buildDays(trip.startDate, trip.endDate, timeline, scheduledActivities);
   const result: Array<{ day: string; dayNumber: number; events: TimelineEvent[]; dayActivities: Activity[] }> = [];
   let dayNumber = 1;
   for (const day of days) {

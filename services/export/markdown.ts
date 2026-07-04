@@ -55,12 +55,15 @@ function dayKey(date: string): string {
 
 // ─── Day-range generation ─────────────────────────────────────────────────────
 
-function buildDays(startDate: string | null, endDate: string | null, events: TimelineEvent[]): string[] {
-  // Collect all event dates
-  const eventDates = new Set(events.map((e) => dayKey(e.date)));
+function buildDays(startDate: string | null, endDate: string | null, events: TimelineEvent[], activities: Activity[]): string[] {
+  // Collect all event dates plus any scheduled activity dates
+  const knownDates = new Set<string>([
+    ...events.map((e) => dayKey(e.date)),
+    ...activities.filter((a) => a.scheduledDate).map((a) => dayKey(a.scheduledDate!)),
+  ]);
 
   if (!startDate && !endDate) {
-    return Array.from(eventDates).sort();
+    return Array.from(knownDates).sort();
   }
 
   const days: string[] = [];
@@ -73,8 +76,8 @@ function buildDays(startDate: string | null, endDate: string | null, events: Tim
     cursor.setDate(cursor.getDate() + 1);
   }
 
-  // Add any event dates that fall outside the defined range
-  for (const d of eventDates) {
+  // Add any known dates that fall outside the defined range
+  for (const d of knownDates) {
     if (!days.includes(d)) days.push(d);
   }
 
@@ -237,8 +240,8 @@ export function generateMarkdown(payload: TripExportPayload): string {
   lines.push('## Itinerary');
   lines.push('');
 
-  const days = buildDays(trip.startDate, trip.endDate, timeline);
   const scheduledActivities = activities.filter((a) => a.scheduledDate);
+  const days = buildDays(trip.startDate, trip.endDate, timeline, scheduledActivities);
 
   let dayNumber = 1;
   for (const day of days) {
