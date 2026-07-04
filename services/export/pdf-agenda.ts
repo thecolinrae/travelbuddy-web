@@ -263,7 +263,7 @@ function buildHourTable(
   const hours: number[] = [];
   for (let h = startHour; h < endHour; h++) hours.push(h);
 
-  const body: Content[][] = [
+  const body = [
     [
       { text: 'ANYTIME', fontSize: 6.5, bold: true, color: C.muted, margin: [4, 4, 2, 0] },
       { stack: anytime, margin: [4, 3, 4, 3] },
@@ -272,7 +272,7 @@ function buildHourTable(
       { text: fmtHourLabel(h), fontSize: 7.5, bold: true, color: C.nearBlack, margin: [4, 4, 2, 0] },
       { stack: byHour.get(h) ?? [], margin: [4, 3, 4, 3] },
     ]),
-  ];
+  ] as unknown as Content[][];
 
   const heights = [anytimeRowH, ...hours.map(() => hourRowH)];
 
