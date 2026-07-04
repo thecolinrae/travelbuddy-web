@@ -65,6 +65,29 @@ export const C = {
 // Lucide Compass SVG (used in the cover-page wordmark badge)
 export const COMPASS_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>`;
 
+/** Fetches an image URL and returns it as a base64 data URI, or null on any failure. */
+export async function fetchImage(url: string, label = 'image', init?: RequestInit): Promise<string | null> {
+  try {
+    const res = await fetch(url, init);
+    const mime = res.headers.get('content-type') ?? '';
+    if (!res.ok || !mime.startsWith('image/')) {
+      const body = await res.text();
+      console.warn(
+        `[PDF export] ${label} failed — HTTP ${res.status}, content-type "${mime}"\n` +
+        `  URL: ${url.slice(0, 300)}\n` +
+        `  Body: ${body.slice(0, 400)}`,
+      );
+      return null;
+    }
+    const buf = await res.arrayBuffer();
+    console.log(`[PDF export] ${label} fetched OK — ${buf.byteLength} bytes, ${mime}`);
+    return `data:${mime};base64,${Buffer.from(buf).toString('base64')}`;
+  } catch (err) {
+    console.warn(`[PDF export] Error fetching ${label}:`, err);
+    return null;
+  }
+}
+
 // ─── Formatting helpers ───────────────────────────────────────────────────────
 
 export function fmtDateShort(iso: string): string {

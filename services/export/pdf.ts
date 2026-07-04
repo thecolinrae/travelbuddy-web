@@ -28,6 +28,7 @@ import {
   createPrinter,
   C,
   COMPASS_SVG,
+  fetchImage,
   fmtDateShort,
   fmtDateMed,
   fmtTime,
@@ -834,28 +835,6 @@ export async function renderTripBinderPdf(payload: TripExportPayload): Promise<B
   // Fetch cover image + static route map in parallel
   let coverImageData: string | null = null;
   let staticMapData: string | null = null;
-
-  const fetchImage = async (url: string, label = 'image', init?: RequestInit): Promise<string | null> => {
-    try {
-      const res = await fetch(url, init);
-      const mime = res.headers.get('content-type') ?? '';
-      if (!res.ok || !mime.startsWith('image/')) {
-        const body = await res.text();
-        console.warn(
-          `[PDF export] ${label} failed — HTTP ${res.status}, content-type "${mime}"\n` +
-          `  URL: ${url.slice(0, 300)}\n` +
-          `  Body: ${body.slice(0, 400)}`,
-        );
-        return null;
-      }
-      const buf = await res.arrayBuffer();
-      console.log(`[PDF export] ${label} fetched OK — ${buf.byteLength} bytes, ${mime}`);
-      return `data:${mime};base64,${Buffer.from(buf).toString('base64')}`;
-    } catch (err) {
-      console.warn(`[PDF export] Error fetching ${label}:`, err);
-      return null;
-    }
-  };
 
   const coverFetch = payload.trip.coverPhotoUrl
     ? fetchImage(payload.trip.coverPhotoUrl, 'cover photo')

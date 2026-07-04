@@ -12,7 +12,13 @@
  * range so the grid always fills the available column height exactly,
  * whether that's a tight 8am–midnight or a spacious 9am–6pm.
  *
- * The first two leaves are always a Quick Reference summary (flights, ground
+ * Page 1 is always a full-bleed cover — trip photo (or a yellow fallback),
+ * trip name, destinations in the order the itinerary actually visits them,
+ * and the date range — the same treatment as the trip binder's cover. It
+ * stands alone rather than sharing a page with a leaf, so in booklet mode
+ * it's meant to print separately as a wraparound cover sheet.
+ *
+ * The next two leaves are always a Quick Reference summary (flights, ground
  * transport, hotels), same idea as the trip binder's Quick Reference page.
  *
  * An optional "booklet" mode reorders the physical pages into saddle-stitch
@@ -35,7 +41,7 @@ import type {
   TransportDepartureEvent,
 } from '@/types';
 import type { Content, TDocumentDefinitions, ContentDay } from './pdf-shared';
-import { createPrinter, C, fmtDateShort, fmtDateMed, fmtTime, fmtCost, buildContentDays } from './pdf-shared';
+import { createPrinter, C, COMPASS_SVG, fetchImage, fmtDateShort, fmtDateMed, fmtTime, fmtCost, buildContentDays } from './pdf-shared';
 
 // US Letter, landscape (11in × 8.5in)
 const PAGE_W = 792;
@@ -543,6 +549,57 @@ function quickRefHotelsLeaf(payload: TripExportPayload, x0: number, y0: number, 
   return items;
 }
 
+// ─── Cover page ─────────────────────────────────────────────────────────────────
+// Same idea as the trip binder's cover: full-bleed photo, dark overlay, trip
+// name + destinations + dates typeset over it. Always page 1 of the document,
+// full-width (not split into leaves), regardless of booklet mode — in booklet
+// mode it prints separately as a standalone wraparound cover.
+
+/** Cities visited, in the order the itinerary actually visits them (not however trip.destinations happens to be stored). */
+function chronologicalDestinations(contentDays: ContentDay[]): string[] {
+  const cities: string[] = [];
+  for (const day of contentDays) {
+    const city = day.events.find((e) => e.locationCity)?.locationCity;
+    if (city && cities[cities.length - 1] !== city) cities.push(city);
+  }
+  return cities;
+}
+
+function renderCoverPage(payload: TripExportPayload, contentDays: ContentDay[], hasCoverImage: boolean): Content[] {
+  const { trip } = payload;
+
+  const dateRange = (() => {
+    if (!trip.startDate && !trip.endDate) return '';
+    const fmt = (d: string) =>
+      new Date(d + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+    if (trip.startDate && trip.endDate && trip.startDate !== trip.endDate)
+      return `${fmt(trip.startDate)} – ${fmt(trip.endDate)}`;
+    return fmt((trip.startDate ?? trip.endDate)!);
+  })();
+
+  const chronoDests = chronologicalDestinations(contentDays);
+  const destinations = chronoDests.length > 1 ? chronoDests.join(' · ') : (chronoDests[0] ?? trip.destination);
+
+  const textColor = hasCoverImage ? C.white : C.nearBlack;
+  const subColor = hasCoverImage ? '#E5E7EB' : C.muted;
+
+  return [
+    // TravelBuddy wordmark badge — pill + compass + text, top-left
+    { canvas: [{ type: 'rect', x: 0, y: 0, w: 116, h: 24, r: 12, color: C.yellow }], absolutePosition: { x: MARGIN, y: 16 } } as unknown as Content,
+    { svg: COMPASS_SVG, width: 14, height: 14, absolutePosition: { x: MARGIN + 7, y: 21 } } as unknown as Content,
+    absText(MARGIN + 26, 24, 90, { text: 'TravelBuddy', font: 'Times', fontSize: 12, bold: true, color: C.nearBlack }),
+
+    // Trip name — big serif anchored a fixed distance above the bottom edge
+    absText(MARGIN, PAGE_H - 150, PAGE_W - MARGIN * 2 - 40, {
+      text: trip.name, font: 'Times', fontSize: 36, bold: true, color: textColor, lineHeight: 1.1,
+    }),
+    // Destinations, in the order actually visited
+    ...(destinations ? [absText(MARGIN, PAGE_H - 95, PAGE_W - MARGIN * 2, { text: destinations, fontSize: 14, color: subColor })] : []),
+    // Date range
+    ...(dateRange ? [absText(MARGIN, PAGE_H - 50, PAGE_W - MARGIN * 2, { text: dateRange, fontSize: 11, color: hasCoverImage ? '#9CA3AF' : C.muted })] : []),
+  ];
+}
+
 // ─── Booklet imposition ────────────────────────────────────────────────────────
 //
 // Fold-and-staple booklet printing needs the physical sheets in "signature"
@@ -605,7 +662,14 @@ export async function renderTripAgendaPdf(
     ...renderLeaf(right, rightX),
   ];
 
-  const items: Content[] = [];
+  // Cover is always page 1 — a standalone full-bleed page, not split into leaves.
+  // In booklet mode it's meant to print separately as a wraparound cover sheet.
+  const coverImageData = payload.trip.coverPhotoUrl
+    ? await fetchImage(payload.trip.coverPhotoUrl, 'agenda cover photo')
+    : null;
+
+  const items: Content[] = renderCoverPage(payload, contentDays, !!coverImageData);
+  items.push(Object.assign({ text: '' } as object, { pageBreak: 'before' }) as Content);
 
   if (contentDays.length === 0) {
     items.push({ text: 'No scheduled days to display.', margin: [0, 60, 0, 0], alignment: 'center', color: C.muted } as Content);
@@ -620,29 +684,21 @@ export async function renderTripAgendaPdf(
       const pageSlots = buildBookletPageSlots(leaves.length);
       pageSlots.forEach(([li, ri], pageIndex) => {
         const pageItems = renderPage(li !== null ? leaves[li] : null, ri !== null ? leaves[ri] : null);
-        if (pageIndex === 0) {
-          items.push(...pageItems);
-        } else {
-          items.push(Object.assign({ text: '' } as object, { pageBreak: 'before' }) as Content);
-          items.push(...pageItems);
-        }
+        if (pageIndex > 0) items.push(Object.assign({ text: '' } as object, { pageBreak: 'before' }) as Content);
+        items.push(...pageItems);
       });
     } else {
       for (let i = 0; i < leaves.length; i += 2) {
         const pageItems = renderPage(leaves[i], leaves[i + 1] ?? null);
-        if (i === 0) {
-          items.push(...pageItems);
-        } else {
-          // Force a page break before this pair's first item; the rest are plain
-          // absolute items and don't affect the flow cursor.
-          items.push(Object.assign({ text: '' } as object, { pageBreak: 'before' }) as Content);
-          items.push(...pageItems);
-        }
+        if (i > 0) items.push(Object.assign({ text: '' } as object, { pageBreak: 'before' }) as Content);
+        items.push(...pageItems);
       }
     }
   }
 
   const printer = createPrinter();
+  const images: Record<string, string> = {};
+  if (coverImageData) images.cover = coverImageData;
 
   const docDefinition: TDocumentDefinitions = {
     pageSize: 'LETTER',
@@ -653,14 +709,41 @@ export async function renderTripAgendaPdf(
       author: 'TravelBuddy',
       subject: `${payload.trip.destination} — Daily Agenda`,
     },
-    footer: (currentPage, pageCount) => ({
-      margin: [MARGIN, 8, MARGIN, 0],
-      columns: [
-        { text: 'TravelBuddy', fontSize: 8, color: C.light },
-        { text: `${payload.trip.name} — Agenda`, fontSize: 8, color: C.light, alignment: 'center' },
-        { text: `${currentPage} / ${pageCount}`, fontSize: 8, color: C.light, alignment: 'right' },
-      ],
-    }),
+    images,
+    // Cover page background: full-bleed photo (or yellow fallback) + dark overlay + yellow top bar
+    background: (currentPage, pageSize) => {
+      if (currentPage !== 1) return null;
+      const bgItems: Content[] = [];
+      if (coverImageData) {
+        bgItems.push({ image: 'cover', width: pageSize.width, height: pageSize.height, absolutePosition: { x: 0, y: 0 } } as unknown as Content);
+        bgItems.push({
+          canvas: [{ type: 'rect', x: 0, y: 0, w: pageSize.width, h: pageSize.height, color: '#000000', fillOpacity: 0.55 }],
+          absolutePosition: { x: 0, y: 0 },
+        } as unknown as Content);
+      } else {
+        bgItems.push({
+          canvas: [{ type: 'rect', x: 0, y: 0, w: pageSize.width, h: pageSize.height, color: '#FACC15' }],
+          absolutePosition: { x: 0, y: 0 },
+        } as unknown as Content);
+      }
+      bgItems.push({
+        canvas: [{ type: 'rect', x: 0, y: 0, w: pageSize.width, h: 5, color: C.yellow }],
+        absolutePosition: { x: 0, y: 0 },
+      } as unknown as Content);
+      return bgItems;
+    },
+    // Footer — skip on the cover page
+    footer: (currentPage, pageCount) => {
+      if (currentPage === 1) return null;
+      return {
+        margin: [MARGIN, 8, MARGIN, 0],
+        columns: [
+          { text: 'TravelBuddy', fontSize: 8, color: C.light },
+          { text: `${payload.trip.name} — Agenda`, fontSize: 8, color: C.light, alignment: 'center' },
+          { text: `${currentPage} / ${pageCount}`, fontSize: 8, color: C.light, alignment: 'right' },
+        ],
+      };
+    },
     content: items,
     defaultStyle: {
       font: 'Helvetica',

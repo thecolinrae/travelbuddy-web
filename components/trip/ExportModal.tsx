@@ -66,7 +66,7 @@ const FORMATS: Array<{
     id: 'agenda',
     icon: CalendarClock,
     label: 'Agenda (Print)',
-    description: 'Landscape day-planner PDF — two days per page with an hourly grid, ready to fill in by hand.',
+    description: 'Landscape day-planner PDF with a photo cover — two days per page with an hourly grid, ready to fill in by hand.',
     buttonLabel: 'Download PDF',
     color: 'text-secondary',
   },
