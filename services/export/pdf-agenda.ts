@@ -105,6 +105,41 @@ function estimateLineCount(text: string, fontSize: number, width: number): numbe
   return Math.max(1, Math.ceil(text.length / charsPerLine));
 }
 
+/**
+ * Absolutely-positioned text that reliably wraps at `width`. A plain
+ * `{ text, width, absolutePosition }` node is not dependable — pdfmake sizes
+ * absolutely-positioned text against the surrounding flow's available width,
+ * not the given `width`, so long strings can run straight past their lane
+ * instead of wrapping. Wrapping the text in a single fixed-width table cell
+ * (the same technique eventCard/miniCard already use) forces the wrap point.
+ */
+function absText(
+  x: number,
+  y: number,
+  width: number,
+  opts: { text: string; fontSize: number; bold?: boolean; italics?: boolean; color?: string; lineHeight?: number; font?: string },
+): Content {
+  return {
+    table: {
+      widths: [width],
+      body: [[{
+        text: opts.text,
+        fontSize: opts.fontSize,
+        bold: opts.bold,
+        italics: opts.italics,
+        color: opts.color,
+        lineHeight: opts.lineHeight,
+        font: opts.font,
+      }]],
+    },
+    layout: {
+      defaultBorder: false,
+      paddingLeft: () => 0, paddingRight: () => 0, paddingTop: () => 0, paddingBottom: () => 0,
+    },
+    absolutePosition: { x, y },
+  } as unknown as Content;
+}
+
 // ─── Raw item extraction ───────────────────────────────────────────────────────
 
 interface RawItem {
@@ -267,12 +302,10 @@ function agendaDayColumn(
     canvas: [{ type: 'rect', x: 0, y: 0, w: 3, h: HEADER_H - 4, color: C.yellow }],
     absolutePosition: { x: x0, y: y0 },
   } as unknown as Content);
-  items.push({
+  items.push(absText(x0 + 10, y0 + 2, colW - 10, {
     text: `Day ${contentDay.dayNumber}  ·  ${fmtDateMed(contentDay.day)}${city ? `  ·  ${city}` : ''}`,
     font: 'Times', fontSize: 11, bold: true, color: C.nearBlack,
-    absolutePosition: { x: x0 + 10, y: y0 + 2 },
-    width: colW - 10,
-  } as unknown as Content);
+  }));
 
   // ── Classify raw items into the timed grid vs. the "Other" strip ───────────
   const raw = collectRawItems(contentDay.events, contentDay.dayActivities);
@@ -301,14 +334,12 @@ function agendaDayColumn(
   // into the same reserved band, whether it has content or not, so the grid
   // below always starts at the same fixed offset regardless of this day's content.
   if (other.length > 0) {
-    items.push({
+    items.push(absText(x0, y0 + HEADER_H, colW, {
       text: 'Also: ' + other.map((o) => o.label).join('  ·  '),
       fontSize: 6.3,
       color: C.muted,
-      absolutePosition: { x: x0, y: y0 + HEADER_H },
-      width: colW,
       lineHeight: 1.1,
-    } as unknown as Content);
+    }));
   }
 
   // ── Grid geometry — slotH is derived from the chosen hour range so the grid
@@ -349,14 +380,12 @@ function agendaDayColumn(
 
   // Hour labels, vertically centered in their 2-slot band
   for (let h = 0; h < numHours; h++) {
-    items.push({
+    items.push(absText(x0 + 3, gridTop + h * 2 * slotH + slotH - 4, LABEL_W - 5, {
       text: fmtHourLabel(startHour + h),
       fontSize: 6.8,
       bold: true,
       color: C.nearBlack,
-      absolutePosition: { x: x0 + 3, y: gridTop + h * 2 * slotH + slotH - 4 },
-      width: LABEL_W - 5,
-    } as unknown as Content);
+    }));
   }
 
   // ── Event blocks, side-by-side within overlap clusters ─────────────────────
@@ -381,15 +410,13 @@ function agendaDayColumn(
     const titleLineH = titleFontSize * 1.05;
     const titleBlockH = estimateLineCount(titleStr, titleFontSize, textW) * titleLineH;
 
-    items.push({
+    items.push(absText(x + 3, y + 1.5, textW, {
       text: titleStr,
       fontSize: titleFontSize,
       bold: true,
       color: EVENT_TEXT_COLOR,
-      absolutePosition: { x: x + 3, y: y + 1.5 },
-      width: textW,
       lineHeight: 1.05,
-    } as unknown as Content);
+    }));
 
     // Fit as many wrapped detail lines as the block's actual height allows —
     // a 30-minute block shows nothing extra, a 3-hour one can show them all.
@@ -399,14 +426,12 @@ function agendaDayColumn(
     for (const detail of it.details.filter(Boolean)) {
       const neededH = estimateLineCount(detail, detailFontSize, textW) * detailLineH;
       if (cursorY + neededH > y + h - 1) break;
-      items.push({
+      items.push(absText(x + 3, cursorY, textW, {
         text: detail,
         fontSize: detailFontSize,
         color: '#F3F4F6',
-        absolutePosition: { x: x + 3, y: cursorY },
-        width: textW,
         lineHeight: 1.15,
-      } as unknown as Content);
+      }));
       cursorY += neededH;
     }
   }
@@ -431,8 +456,8 @@ function staticCard(x: number, y: number, width: number, color: string, title: s
 
   const items: Content[] = [
     { canvas: [{ type: 'rect', x: 0, y: 0, w: 2.5, h: totalH, color }], absolutePosition: { x, y } } as unknown as Content,
-    { text: title, fontSize: titleFontSize, bold: true, color: C.nearBlack, absolutePosition: { x: x + 7, y: y + pad }, width: textW, lineHeight: 1.15 } as unknown as Content,
-    ...(hasDetail ? [{ text: detail, fontSize: detailFontSize, color: C.muted, absolutePosition: { x: x + 7, y: y + pad + titleH + 2 }, width: textW, lineHeight: 1.15 } as unknown as Content] : []),
+    absText(x + 7, y + pad, textW, { text: title, fontSize: titleFontSize, bold: true, color: C.nearBlack, lineHeight: 1.15 }),
+    ...(hasDetail ? [absText(x + 7, y + pad + titleH + 2, textW, { text: detail, fontSize: detailFontSize, color: C.muted, lineHeight: 1.15 })] : []),
   ];
   return { items, height: totalH + 5 };
 }
@@ -440,8 +465,8 @@ function staticCard(x: number, y: number, width: number, color: string, title: s
 function leafHeader(x0: number, y0: number, colW: number, title: string, subtitle: string): Content[] {
   return [
     { canvas: [{ type: 'rect', x: 0, y: 0, w: 3, h: HEADER_H - 4, color: C.yellow }], absolutePosition: { x: x0, y: y0 } } as unknown as Content,
-    { text: title, font: 'Times', fontSize: 12, bold: true, color: C.nearBlack, absolutePosition: { x: x0 + 10, y: y0 + 1 }, width: colW - 10 } as unknown as Content,
-    { text: subtitle, fontSize: 7.5, color: C.muted, absolutePosition: { x: x0 + 10, y: y0 + 15 }, width: colW - 10 } as unknown as Content,
+    absText(x0 + 10, y0 + 1, colW - 10, { text: title, font: 'Times', fontSize: 12, bold: true, color: C.nearBlack }),
+    absText(x0 + 10, y0 + 15, colW - 10, { text: subtitle, fontSize: 7.5, color: C.muted }),
   ];
 }
 
@@ -457,7 +482,7 @@ function quickRefFlightsLeaf(payload: TripExportPayload, x0: number, y0: number,
 
   const addSection = (label: string, rows: { color: string; title: string; detail: string }[]) => {
     if (y + 10 > bottomLimit) return;
-    items.push({ text: label, fontSize: 6.5, bold: true, color: C.muted, absolutePosition: { x: x0, y }, width: colW } as unknown as Content);
+    items.push(absText(x0, y, colW, { text: label, fontSize: 6.5, bold: true, color: C.muted }));
     y += 10;
     let shown = 0;
     for (const row of rows) {
@@ -468,7 +493,7 @@ function quickRefFlightsLeaf(payload: TripExportPayload, x0: number, y0: number,
       shown++;
     }
     if (shown < rows.length) {
-      items.push({ text: `+${rows.length - shown} more — see full itinerary`, fontSize: 6, italics: true, color: C.muted, absolutePosition: { x: x0, y }, width: colW } as unknown as Content);
+      items.push(absText(x0, y, colW, { text: `+${rows.length - shown} more — see full itinerary`, fontSize: 6, italics: true, color: C.muted }));
       y += 9;
     }
     y += 6;
@@ -512,7 +537,7 @@ function quickRefHotelsLeaf(payload: TripExportPayload, x0: number, y0: number, 
     shown++;
   }
   if (shown < hotels.length) {
-    items.push({ text: `+${hotels.length - shown} more — see full itinerary`, fontSize: 6, italics: true, color: C.muted, absolutePosition: { x: x0, y }, width: colW } as unknown as Content);
+    items.push(absText(x0, y, colW, { text: `+${hotels.length - shown} more — see full itinerary`, fontSize: 6, italics: true, color: C.muted }));
   }
 
   return items;
