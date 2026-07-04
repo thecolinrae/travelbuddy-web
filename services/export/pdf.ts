@@ -27,7 +27,7 @@ import type { Content, TDocumentDefinitions } from './pdf-shared';
 import {
   createPrinter,
   C,
-  COMPASS_SVG,
+  LOGO_SVG,
   fetchImage,
   fmtDateShort,
   fmtDateMed,
@@ -396,7 +396,7 @@ function coverContent(payload: TripExportPayload, hasCoverImage: boolean): Conte
       absolutePosition: { x: MARGIN, y: 16 },
     } as unknown as Content,
     {
-      svg: COMPASS_SVG,
+      svg: LOGO_SVG,
       width: 14,
       height: 14,
       absolutePosition: { x: MARGIN + 7, y: 21 },

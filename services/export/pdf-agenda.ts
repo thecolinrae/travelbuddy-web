@@ -41,7 +41,7 @@ import type {
   TransportDepartureEvent,
 } from '@/types';
 import type { Content, TDocumentDefinitions, ContentDay } from './pdf-shared';
-import { createPrinter, C, COMPASS_SVG, fetchImage, fmtDateShort, fmtDateMed, fmtTime, fmtCost, buildContentDays } from './pdf-shared';
+import { createPrinter, C, LOGO_SVG, fetchImage, fmtDateShort, fmtDateMed, fmtTime, fmtCost, buildContentDays } from './pdf-shared';
 
 // US Letter, landscape (11in × 8.5in)
 const PAGE_W = 792;
@@ -552,8 +552,12 @@ function quickRefHotelsLeaf(payload: TripExportPayload, x0: number, y0: number, 
 // ─── Cover page ─────────────────────────────────────────────────────────────────
 // Same idea as the trip binder's cover: full-bleed photo, dark overlay, trip
 // name + destinations + dates typeset over it. Always page 1 of the document,
-// full-width (not split into leaves), regardless of booklet mode — in booklet
-// mode it prints separately as a standalone wraparound cover.
+// full-width (not split into leaves).
+//
+// In booklet mode this same page folds down the centerline into a front and
+// back cover. The photo is free to wrap continuously across both halves, but
+// all typesetting has to live entirely within the right half — the half that
+// becomes the front cover once folded — or it prints on the back instead.
 
 /** Cities visited, in the order the itinerary actually visits them (not however trip.destinations happens to be stored). */
 function chronologicalDestinations(contentDays: ContentDay[]): string[] {
@@ -565,7 +569,7 @@ function chronologicalDestinations(contentDays: ContentDay[]): string[] {
   return cities;
 }
 
-function renderCoverPage(payload: TripExportPayload, contentDays: ContentDay[], hasCoverImage: boolean): Content[] {
+function renderCoverPage(payload: TripExportPayload, contentDays: ContentDay[], hasCoverImage: boolean, forBooklet: boolean): Content[] {
   const { trip } = payload;
 
   const dateRange = (() => {
@@ -583,21 +587,54 @@ function renderCoverPage(payload: TripExportPayload, contentDays: ContentDay[], 
   const textColor = hasCoverImage ? C.white : C.nearBlack;
   const subColor = hasCoverImage ? '#E5E7EB' : C.muted;
 
-  return [
-    // TravelBuddy wordmark badge — pill + compass + text, top-left
-    { canvas: [{ type: 'rect', x: 0, y: 0, w: 116, h: 24, r: 12, color: C.yellow }], absolutePosition: { x: MARGIN, y: 16 } } as unknown as Content,
-    { svg: COMPASS_SVG, width: 14, height: 14, absolutePosition: { x: MARGIN + 7, y: 21 } } as unknown as Content,
-    absText(MARGIN + 26, 24, 90, { text: 'TravelBuddy', font: 'Times', fontSize: 12, bold: true, color: C.nearBlack }),
+  // Non-booklet: the whole landscape page is the cover, so typesetting can use
+  // its full width starting from the left margin.
+  // Booklet: confine everything to the right half, clear of the fold.
+  const foldGap = 24;
+  const textX0 = forBooklet ? PAGE_W / 2 + foldGap : MARGIN;
+  const textW = forBooklet ? (PAGE_W - MARGIN) - textX0 : PAGE_W - MARGIN * 2 - 40;
 
-    // Trip name — big serif anchored a fixed distance above the bottom edge
-    absText(MARGIN, PAGE_H - 150, PAGE_W - MARGIN * 2 - 40, {
-      text: trip.name, font: 'Times', fontSize: 36, bold: true, color: textColor, lineHeight: 1.1,
-    }),
-    // Destinations, in the order actually visited
-    ...(destinations ? [absText(MARGIN, PAGE_H - 95, PAGE_W - MARGIN * 2, { text: destinations, fontSize: 14, color: subColor })] : []),
-    // Date range
-    ...(dateRange ? [absText(MARGIN, PAGE_H - 50, PAGE_W - MARGIN * 2, { text: dateRange, fontSize: 11, color: hasCoverImage ? '#9CA3AF' : C.muted })] : []),
+  const items: Content[] = [
+    // TravelBuddy wordmark badge — pill + plane + text
+    { canvas: [{ type: 'rect', x: 0, y: 0, w: 116, h: 24, r: 12, color: C.yellow }], absolutePosition: { x: textX0, y: 16 } } as unknown as Content,
+    { svg: LOGO_SVG, width: 14, height: 14, absolutePosition: { x: textX0 + 7, y: 21 } } as unknown as Content,
+    absText(textX0 + 26, 24, 90, { text: 'TravelBuddy', font: 'Times', fontSize: 12, bold: true, color: C.nearBlack }),
   ];
+
+  if (forBooklet) {
+    // The right-half column is much narrower than the full page, so the title
+    // is more likely to wrap — stack everything from an estimated total height
+    // instead of fixed offsets, so lines never collide regardless of length.
+    const titleFontSize = 26;
+    const destFontSize = 12;
+    const dateFontSize = 10;
+    const gap = 8;
+
+    const titleH = estimateLineCount(trip.name, titleFontSize, textW) * titleFontSize * 1.15;
+    const destH = destinations ? estimateLineCount(destinations, destFontSize, textW) * destFontSize * 1.2 : 0;
+    const dateH = dateRange ? dateFontSize * 1.2 : 0;
+
+    let cursorY = (PAGE_H - 40) - titleH - (destinations ? gap + destH : 0) - (dateRange ? gap + dateH : 0);
+
+    items.push(absText(textX0, cursorY, textW, { text: trip.name, font: 'Times', fontSize: titleFontSize, bold: true, color: textColor, lineHeight: 1.15 }));
+    cursorY += titleH + gap;
+    if (destinations) {
+      items.push(absText(textX0, cursorY, textW, { text: destinations, fontSize: destFontSize, color: subColor }));
+      cursorY += destH + gap;
+    }
+    if (dateRange) {
+      items.push(absText(textX0, cursorY, textW, { text: dateRange, fontSize: dateFontSize, color: hasCoverImage ? '#9CA3AF' : C.muted }));
+    }
+  } else {
+    // Trip name — big serif anchored a fixed distance above the bottom edge
+    items.push(absText(textX0, PAGE_H - 150, textW, {
+      text: trip.name, font: 'Times', fontSize: 36, bold: true, color: textColor, lineHeight: 1.1,
+    }));
+    if (destinations) items.push(absText(textX0, PAGE_H - 95, PAGE_W - MARGIN * 2, { text: destinations, fontSize: 14, color: subColor }));
+    if (dateRange) items.push(absText(textX0, PAGE_H - 50, PAGE_W - MARGIN * 2, { text: dateRange, fontSize: 11, color: hasCoverImage ? '#9CA3AF' : C.muted }));
+  }
+
+  return items;
 }
 
 // ─── Booklet imposition ────────────────────────────────────────────────────────
@@ -668,7 +705,7 @@ export async function renderTripAgendaPdf(
     ? await fetchImage(payload.trip.coverPhotoUrl, 'agenda cover photo')
     : null;
 
-  const items: Content[] = renderCoverPage(payload, contentDays, !!coverImageData);
+  const items: Content[] = renderCoverPage(payload, contentDays, !!coverImageData, !!opts?.booklet);
   items.push(Object.assign({ text: '' } as object, { pageBreak: 'before' }) as Content);
 
   if (contentDays.length === 0) {
