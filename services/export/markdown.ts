@@ -136,6 +136,7 @@ function renderHotelCheckIn(e: HotelCheckInEvent): string {
   if (e.breakfastIncluded) details.push('Breakfast included');
   if (e.checkoutDate) details.push(`Check-out: ${fmtDate(e.checkoutDate)}${e.checkoutTime ? ' ' + fmtTime(e.checkoutTime) : ''}`);
   if (details.length) lines.push(`- ${details.join(' · ')}`);
+  if (e.locationAddress) lines.push(`- ${e.locationAddress}`);
   if (e.amenities && e.amenities.length > 0) lines.push(`- Amenities: ${e.amenities.join(', ')}`);
   if (e.notes) lines.push(`- ${e.notes}`);
   return lines.join('\n');
@@ -150,6 +151,7 @@ function renderTransport(e: TransportDepartureEvent): string {
   if (e.vendor) details.push(e.vendor);
   if (e.bookingRef) details.push(`Ref: ${e.bookingRef}`);
   if (details.length) lines.push(`- ${details.join(' · ')}`);
+  if (e.locationAddress) lines.push(`- ${e.locationAddress}`);
   if (e.notes) lines.push(`- ${e.notes}`);
   return lines.join('\n');
 }
@@ -168,6 +170,7 @@ function renderActivity(e: ActivityEvent): string {
   if (e.tips) details.push(`Tip: ${e.tips}`);
   let line = `- ${e.description}${duration}${cost}`;
   if (details.length) line += `\n  - ${details.join(' · ')}`;
+  if (e.locationAddress) line += `\n  - ${e.locationAddress}`;
   return line;
 }
 
@@ -306,6 +309,7 @@ export function generateMarkdown(payload: TripExportPayload): string {
         const timeStr = a.scheduledTime ? ` at ${fmtTime(a.scheduledTime)}` : '';
         const duration = a.duration ? ` (${a.duration})` : '';
         lines.push(`- ${a.name}${timeStr}${duration}`);
+        if (a.address) lines.push(`  - ${a.address}`);
       }
       lines.push('');
     }
@@ -398,6 +402,7 @@ export function generateMarkdown(payload: TripExportPayload): string {
       if (a.duration) meta.push(a.duration);
       const metaStr = meta.length ? ` (${meta.join(' · ')})` : '';
       lines.push(`- **${a.name}**${metaStr}`);
+      if (a.address) lines.push(`  ${a.address}`);
       if (a.description) lines.push(`  ${a.description}`);
     }
     lines.push('');

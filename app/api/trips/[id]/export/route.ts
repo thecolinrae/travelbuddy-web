@@ -1,10 +1,11 @@
 /**
- * Trip export API — GET /api/trips/[id]/export?format=zip|markdown|pdf
+ * Trip export API — GET /api/trips/[id]/export?format=zip|markdown|pdf|agenda
  *
  * Exports the trip in the requested format:
  *   zip      — ZIP package with trip.json + uploaded artifact files
  *   markdown — Day-by-day .md file with YAML frontmatter
  *   pdf      — Printable trip binder (cover, quick ref, daily itinerary, budget)
+ *   agenda   — Printable landscape day-planner (2 days/page, hourly grid)
  */
 
 import { withTripAuth, apiError } from '@/lib/api';
@@ -14,6 +15,7 @@ import { downloadArtifact } from '@/services/storage';
 import { assembleTripExport } from '@/services/export/json';
 import { generateMarkdown } from '@/services/export/markdown';
 import { renderTripBinderPdf } from '@/services/export/pdf';
+import { renderTripAgendaPdf } from '@/services/export/pdf-agenda';
 import JSZip from 'jszip';
 
 function slugify(name: string): string {
@@ -105,5 +107,24 @@ export const GET = withTripAuth(async ({ trip, params, request }) => {
     }
   }
 
-  return apiError('Invalid format. Use ?format=zip|markdown|pdf', 400);
+  // ── Agenda PDF ───────────────────────────────────────────────────────────────
+  if (format === 'agenda') {
+    try {
+      const pdfBuffer = await renderTripAgendaPdf(payload);
+      return new Response(new Uint8Array(pdfBuffer), {
+        headers: {
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': `attachment; filename="${slug}-agenda.pdf"`,
+          'Content-Length': String(pdfBuffer.length),
+        },
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const stack = err instanceof Error ? err.stack : '';
+      console.error('[Agenda PDF export error]', msg, stack);
+      return apiError(msg, 500);
+    }
+  }
+
+  return apiError('Invalid format. Use ?format=zip|markdown|pdf|agenda', 400);
 });

@@ -10,10 +10,6 @@
  *   Expenses     (chronological expense log, only if expenses exist)
  */
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-type Content = import('pdfmake/interfaces').Content;
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-type TDocumentDefinitions = import('pdfmake/interfaces').TDocumentDefinitions;
 import type { TripExportPayload } from './json';
 import type {
   TimelineEvent,
@@ -25,122 +21,42 @@ import type {
   TransportDepartureEvent,
   ExpenseEvent,
   ActivityEvent,
-  Cost,
   BudgetItemCategory,
 } from '@/types';
+import type { Content, TDocumentDefinitions } from './pdf-shared';
+import {
+  createPrinter,
+  C,
+  COMPASS_SVG,
+  fmtDateShort,
+  fmtDateMed,
+  fmtTime,
+  fmtCost,
+  fmtCurrency,
+  buildContentDays as buildContentDaysShared,
+} from './pdf-shared';
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const PdfPrinter = require('pdfmake/js/Printer').default as {
-  new (fonts: Record<string, unknown>, vfs?: unknown, urlResolver?: unknown): {
-    createPdfKitDocument(dd: TDocumentDefinitions, options?: Record<string, unknown>): Promise<NodeJS.ReadableStream & { end(): void }>;
-  };
-};
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const vfsInstance = require('pdfmake/js/virtual-fs').default as unknown;
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const URLResolver = require('pdfmake/js/URLResolver').default as { new (vfs: unknown): unknown };
-
-// ─── Fonts ────────────────────────────────────────────────────────────────────
-
-const FONTS = {
-  Helvetica: {
-    normal: 'Helvetica',
-    bold: 'Helvetica-Bold',
-    italics: 'Helvetica-Oblique',
-    bolditalics: 'Helvetica-BoldOblique',
-  },
-  Times: {
-    normal: 'Times-Roman',
-    bold: 'Times-Bold',
-    italics: 'Times-Italic',
-    bolditalics: 'Times-BoldItalic',
-  },
-};
-
-// ─── Design tokens ────────────────────────────────────────────────────────────
-
-const C = {
-  yellow: '#FACC15',
-  nearBlack: '#111827',
-  muted: '#6B7280',
-  light: '#9CA3AF',
-  border: '#E5E7EB',
-  surface: '#F3F4F6',
-  white: '#FFFFFF',
-  flightBlue: '#1D4ED8',
-  hotelTerra: '#E07B39',
-  activityGreen: '#2D6A4F',
-  red: '#DC2626',
-} as const;
-
-// A4 in points
-const PAGE_W = 595.28;
-const PAGE_H = 841.89;
+// US Letter in points (8.5in × 11in)
+const PAGE_W = 612;
+const PAGE_H = 792;
 const MARGIN = 40;
 const COL_GAP = 10; // gap between inner event columns within a day
 
 // Computed layout constants
-const CONTENT_H = PAGE_H - 40 - 56;          // 745.89pt (top margin 40 + footer/bottom 56)
-const CONTENT_W = PAGE_W - MARGIN * 2;        // 515.28pt
+const CONTENT_H = PAGE_H - 40 - 56;          // 696pt (top margin 40 + footer/bottom 56)
+const CONTENT_W = PAGE_W - MARGIN * 2;        // 532pt
 
 // Each day section in the daily itinerary takes exactly half the content area.
 // We leave a 2pt gutter so the pair table (two rows + 0.5pt divider) never
 // overflows the page by a rounding error.
-const HALF_H = Math.floor(CONTENT_H / 2) - 1;   // 371pt
+const HALF_H = Math.floor(CONTENT_H / 2) - 1;   // 347pt
 
 // The first daily-itinerary page also has the section heading above the pair table.
 // accentBar consumes ~17pt; sectionHeading ~40pt → reserve 64pt to be safe.
 const HEADING_RESERVED = 64;
-const FIRST_HALF_H = Math.floor((CONTENT_H - HEADING_RESERVED) / 2) - 1; // 339pt
-
-// Lucide Compass SVG (used in the cover-page wordmark badge)
-const COMPASS_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>`;
+const FIRST_HALF_H = Math.floor((CONTENT_H - HEADING_RESERVED) / 2) - 1; // 315pt
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function fmtDateShort(iso: string): string {
-  return new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
-
-function fmtDateMed(iso: string): string {
-  return new Date(iso + 'T12:00:00').toLocaleDateString('en-US', {
-    weekday: 'short', month: 'short', day: 'numeric',
-  });
-}
-
-function fmtTime(time: string | undefined): string {
-  if (!time) return '';
-  const [h, m] = time.split(':').map(Number);
-  const ampm = h >= 12 ? 'pm' : 'am';
-  const hour = h % 12 || 12;
-  return `${hour}:${String(m).padStart(2, '0')}${ampm}`;
-}
-
-function fmtCost(cost: Cost): string {
-  return `$${cost.amountPreferredCurrency.toFixed(2)} ${cost.preferredCurrency}`;
-}
-
-function fmtCurrency(amount: number, currency: string): string {
-  return `$${amount.toFixed(2)} ${currency}`;
-}
-
-function buildDays(startDate: string | null, endDate: string | null, events: TimelineEvent[], activities: Activity[]): string[] {
-  const knownDates = new Set<string>([
-    ...events.map((e) => e.date.slice(0, 10)),
-    ...activities.filter((a) => a.scheduledDate).map((a) => a.scheduledDate!.slice(0, 10)),
-  ]);
-  if (!startDate && !endDate) return Array.from(knownDates).sort();
-  const days: string[] = [];
-  const start = new Date((startDate ?? endDate!) + 'T12:00:00');
-  const end = new Date((endDate ?? startDate!) + 'T12:00:00');
-  const cursor = new Date(start);
-  while (cursor <= end) {
-    days.push(cursor.toISOString().slice(0, 10));
-    cursor.setDate(cursor.getDate() + 1);
-  }
-  for (const d of knownDates) if (!days.includes(d)) days.push(d);
-  return days.sort();
-}
 
 // Thin yellow accent bar (full content-width)
 function accentBar(): Content {
@@ -226,6 +142,7 @@ function buildEventItems(events: TimelineEvent[], dayActivities: Activity[]): Co
     items.push(eventCard(C.hotelTerra, `Check in · ${h.hotelName}`, [
       [h.roomType, h.breakfastIncluded && 'Breakfast included'].filter(Boolean).join(' · '),
       [h.bookingRef && `Ref: ${h.bookingRef}`, h.checkoutDate && `Check-out: ${fmtDateShort(h.checkoutDate)}`].filter(Boolean).join(' · '),
+      h.locationAddress ?? '',
     ]));
   }
 
@@ -235,6 +152,7 @@ function buildEventItems(events: TimelineEvent[], dayActivities: Activity[]): Co
     const typeName = t.transportType.replace('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase());
     items.push(eventCard(C.flightBlue, `${typeName} · ${t.departureLocation} → ${t.arrivalLocation}`, [
       [t.vendor, t.bookingRef && `Ref: ${t.bookingRef}`].filter(Boolean).join(' · '),
+      t.locationAddress ?? '',
     ]));
   }
 
@@ -244,12 +162,14 @@ function buildEventItems(events: TimelineEvent[], dayActivities: Activity[]): Co
     items.push(eventCard(C.activityGreen, a.description, [
       [a.duration, a.cost ? fmtCost(a.cost) : ''].filter(Boolean).join(' · '),
       a.bookingRef ? `Ref: ${a.bookingRef}` : '',
+      a.locationAddress ?? '',
     ]));
   }
 
   for (const a of dayActivities) {
     items.push(eventCard(C.activityGreen, a.name, [
       [a.duration, a.scheduledTime ? fmtTime(a.scheduledTime) : ''].filter(Boolean).join(' · '),
+      a.address ?? '',
     ]));
   }
 
@@ -258,28 +178,7 @@ function buildEventItems(events: TimelineEvent[], dayActivities: Activity[]): Co
 
 // ─── Day content helpers ──────────────────────────────────────────────────────
 
-/** Shared: build sorted list of days with their events + activities. */
-function buildContentDays(payload: TripExportPayload): Array<{
-  day: string;
-  dayNumber: number;
-  events: TimelineEvent[];
-  dayActivities: Activity[];
-}> {
-  const { trip, timeline, activities } = payload;
-  const scheduledActivities = activities.filter((a) => a.scheduledDate);
-  const days = buildDays(trip.startDate, trip.endDate, timeline, scheduledActivities);
-  const result: Array<{ day: string; dayNumber: number; events: TimelineEvent[]; dayActivities: Activity[] }> = [];
-  let dayNumber = 1;
-  for (const day of days) {
-    const dayEvents = timeline.filter((e) => e.date.slice(0, 10) === day && e.type !== 'expense');
-    const dayActivities = scheduledActivities.filter((a) => a.scheduledDate === day);
-    if (dayEvents.length > 0 || dayActivities.length > 0) {
-      result.push({ day, dayNumber, events: dayEvents, dayActivities });
-    }
-    dayNumber++;
-  }
-  return result;
-}
+const buildContentDays = buildContentDaysShared;
 
 /**
  * Build the most interesting Unsplash search query for a day.
@@ -509,10 +408,11 @@ function coverContent(payload: TripExportPayload, hasCoverImage: boolean): Conte
       color: C.nearBlack,
       absolutePosition: { x: MARGIN + 26, y: 24 },
     } as unknown as Content,
-    // Trip name — big serif at ~60% down the page
+    // Trip name — big serif anchored a fixed distance above the bottom edge
+    // (anchored to the bottom rather than a fixed y so it holds its position if PAGE_H changes)
     {
       text: trip.name,
-      absolutePosition: { x: MARGIN, y: 580 },
+      absolutePosition: { x: MARGIN, y: PAGE_H - 261.89 },
       font: 'Times',
       fontSize: 40,
       bold: true,
@@ -523,7 +423,7 @@ function coverContent(payload: TripExportPayload, hasCoverImage: boolean): Conte
     // Destinations — allow up to 3 lines at 14pt (≈20pt/line) below the title
     ...(destinations ? [{
       text: destinations,
-      absolutePosition: { x: MARGIN, y: 648 },
+      absolutePosition: { x: MARGIN, y: PAGE_H - 193.89 },
       fontSize: 13,
       color: subColor,
       // wrap within content width so it doesn't collide with the right edge
@@ -532,7 +432,7 @@ function coverContent(payload: TripExportPayload, hasCoverImage: boolean): Conte
     // Date range — fixed 36pt below the destinations baseline (generous gap)
     ...(dateRange ? [{
       text: dateRange,
-      absolutePosition: { x: MARGIN, y: 720 },
+      absolutePosition: { x: MARGIN, y: PAGE_H - 121.89 },
       fontSize: 11,
       color: hasCoverImage ? '#9CA3AF' : C.muted,
     } as unknown as Content] : []),
@@ -1020,11 +920,10 @@ export async function renderTripBinderPdf(payload: TripExportPayload): Promise<B
     );
   }
 
-  const urlResolver = new URLResolver(vfsInstance);
-  const printer = new PdfPrinter(FONTS, vfsInstance, urlResolver);
+  const printer = createPrinter();
 
   const docDefinition: TDocumentDefinitions = {
-    pageSize: 'A4',
+    pageSize: 'LETTER',
     pageMargins: [MARGIN, MARGIN, MARGIN, 56],
     info: {
       title: payload.trip.name,

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Download, FileText, FileArchive, BookOpen, Loader2 } from 'lucide-react';
+import { Download, FileText, FileArchive, BookOpen, CalendarClock, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
@@ -18,7 +18,7 @@ interface Props {
   tripName: string;
 }
 
-type Format = 'zip' | 'markdown' | 'pdf';
+type Format = 'zip' | 'markdown' | 'pdf' | 'agenda';
 
 const FORMATS: Array<{
   id: Format;
@@ -52,6 +52,14 @@ const FORMATS: Array<{
     buttonLabel: 'Download PDF',
     color: 'text-accent',
   },
+  {
+    id: 'agenda',
+    icon: CalendarClock,
+    label: 'Agenda (Print)',
+    description: 'Landscape day-planner PDF — two days per page with an hourly grid, ready to fill in by hand.',
+    buttonLabel: 'Download PDF',
+    color: 'text-secondary',
+  },
 ];
 
 export function ExportModal({ open, onClose, tripId, tripName }: Props) {
@@ -71,7 +79,10 @@ export function ExportModal({ open, onClose, tripId, tripName }: Props) {
       const disposition = res.headers.get('Content-Disposition') ?? '';
       const match = /filename="([^"]+)"/.exec(disposition);
       const slug = tripName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-      const ext = format === 'zip' ? '.zip' : format === 'markdown' ? '.md' : '-binder.pdf';
+      const ext = format === 'zip' ? '.zip'
+        : format === 'markdown' ? '.md'
+        : format === 'agenda' ? '-agenda.pdf'
+        : '-binder.pdf';
       const filename = match?.[1] ?? `${slug}${ext}`;
 
       // Trigger browser download
