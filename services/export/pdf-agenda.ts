@@ -1,13 +1,15 @@
 /**
  * Agenda PDF export — a printable day-planner view, adapted from Outlook-style
- * schedule editors for paper: landscape orientation, two days per page, an
- * hour-by-hour ruled grid with times down the side, and blank ruled space for
- * hours with nothing booked (so it doubles as a notebook page).
+ * schedule editors for paper: landscape orientation, two days per page (each
+ * confined to its own half of the page — left/right columns), a ruled
+ * half-hour grid with times down the side, and events drawn as colored blocks
+ * stretching from start time to finish time. Overlapping events split into
+ * side-by-side lanes instead of stacking, so a busy hour never grows taller
+ * than the fixed slot height.
  *
- * The displayed hour range is fixed at 8 AM–8 PM unless something in the trip
- * is scheduled at or after 8 PM, in which case the whole document switches to
- * 8 AM–midnight so every event has a row. Events with no time (or a time
- * before 8 AM) land in an "Anytime" row at the top of each day.
+ * The hour range (e.g. 8am–8pm) is chosen by the caller before generating —
+ * see AGENDA_MAX_HOURS below for the largest range that still fits within a
+ * single half-page column without overflowing.
  */
 
 import type { TripExportPayload } from './json';
@@ -27,6 +29,7 @@ import type { Content, TDocumentDefinitions, ContentDay } from './pdf-shared';
 import { createPrinter, C, fmtDateMed, fmtTime, fmtCost, buildContentDays } from './pdf-shared';
 
 // US Letter, landscape (11in × 8.5in)
+const PAGE_W = 792;
 const PAGE_H = 612;
 const MARGIN = 30;
 const FOOTER_EXTRA = 18; // extra bottom margin reserved for the footer, beyond MARGIN
@@ -34,28 +37,33 @@ const COL_GAP = 22;
 
 const CONTENT_H = PAGE_H - MARGIN * 2 - FOOTER_EXTRA;
 
-const HEADER_RESERVED = 32; // day header block, incl. bottom margin
-const GRID_H = CONTENT_H - HEADER_RESERVED;
+const HEADER_H = 26; // day header block
+const ANYTIME_LINE_H = 12; // per line, only reserved when there's untimed/out-of-range content
 
-const AGENDA_START_HOUR = 8;
-const ANYTIME_WEIGHT = 1.6; // the "Anytime" row gets more room than a single hour row
+// Fixed, never-adaptive slot height — every half hour renders identically no
+// matter how many hours are shown or how busy a day is. This is the number
+// that "each day should not extend off its half page" is built around.
+const SLOT_H = 15; // pt per half-hour
+export const AGENDA_DEFAULT_START_HOUR = 8;
+export const AGENDA_DEFAULT_END_HOUR = 20;
+// Largest range guaranteed to fit in one column without overflowing. Reserves
+// room for up to 2 lines of "Also:" text so a busy Anytime strip never pushes
+// the grid past the bottom margin.
+export const AGENDA_MAX_HOURS = Math.floor((CONTENT_H - HEADER_H - ANYTIME_LINE_H * 2) / (2 * SLOT_H));
 
-const LABEL_W = 34;
+const LABEL_W = 30; // hour-label gutter width
+const LANE_GAP = 2; // px gap between side-by-side overlapping event blocks
+const MIN_BLOCK_MIN = 30; // shortest a block ever renders, in minutes (keeps text legible)
+const MARKER_DEFAULT_MIN = 30; // default block length for flights/hotels/transport (no real duration)
+const ACTIVITY_DEFAULT_MIN = 60; // default block length for activities with no parseable duration
 
-/** All timed items get a row within [8am, endHour). Everything else scans the trip for a hint. */
-function computeAgendaEndHour(payload: TripExportPayload): 20 | 24 {
-  let maxHour = -1;
-  for (const e of payload.timeline) {
-    if (e.type === 'expense' || !e.time) continue;
-    const h = Number(e.time.split(':')[0]);
-    if (!Number.isNaN(h)) maxHour = Math.max(maxHour, h);
-  }
-  for (const a of payload.activities) {
-    if (!a.scheduledDate || !a.scheduledTime) continue;
-    const h = Number(a.scheduledTime.split(':')[0]);
-    if (!Number.isNaN(h)) maxHour = Math.max(maxHour, h);
-  }
-  return maxHour >= 20 ? 24 : 20;
+function clampHourRange(startHour?: number, endHour?: number): { startHour: number; endHour: number } {
+  let start = Number.isInteger(startHour) ? (startHour as number) : AGENDA_DEFAULT_START_HOUR;
+  start = Math.max(0, Math.min(23, start));
+  let end = Number.isInteger(endHour) ? (endHour as number) : start + (AGENDA_DEFAULT_END_HOUR - AGENDA_DEFAULT_START_HOUR);
+  end = Math.max(start + 1, Math.min(24, end));
+  if (end - start > AGENDA_MAX_HOURS) end = start + AGENDA_MAX_HOURS;
+  return { startHour: start, endHour: end };
 }
 
 function fmtHourLabel(hour: number): string {
@@ -65,49 +73,32 @@ function fmtHourLabel(hour: number): string {
   return `${displayHour} ${ampm}`;
 }
 
-function parseHour(time: string | undefined): number | null {
+/** Minutes since midnight, or null if unparseable. */
+function parseTimeMinutes(time: string | undefined): number | null {
   if (!time) return null;
-  const h = Number(time.split(':')[0]);
-  return Number.isNaN(h) ? null : h;
+  const [h, m] = time.split(':').map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return null;
+  return h * 60 + m;
 }
 
-// ─── Compact time-slot card ────────────────────────────────────────────────────
-
-function miniCard(accentColor: string, timeLabel: string, title: string, details: string[]): Content {
-  const filtered = details.filter(Boolean);
-  return {
-    table: {
-      widths: [2, '*'],
-      body: [[
-        { border: [false, false, false, false], fillColor: accentColor, text: '' },
-        {
-          border: [false, false, false, false],
-          stack: [
-            {
-              text: timeLabel ? `${timeLabel}  ·  ${title}` : title,
-              fontSize: 7.3,
-              bold: true,
-              color: C.nearBlack,
-              margin: [0, 0, 0, filtered.length ? 1 : 0],
-            },
-            ...filtered.map((d) => ({ text: d, fontSize: 6.3, color: C.muted, lineHeight: 1.15 })),
-          ],
-          margin: [4, 1, 2, 1],
-        },
-      ]],
-    },
-    layout: {
-      defaultBorder: false,
-      paddingLeft: () => 0, paddingRight: () => 0, paddingTop: () => 0, paddingBottom: () => 0,
-    },
-    margin: [0, 0, 0, 2],
-  } as unknown as Content;
+/** Best-effort parse of free-text durations like "2 hours", "45 min", "1.5h". */
+function parseDurationMinutes(duration: string | undefined): number | null {
+  if (!duration) return null;
+  const s = duration.toLowerCase();
+  const hourMatch = s.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h)\b/);
+  if (hourMatch) return Math.round(parseFloat(hourMatch[1]) * 60);
+  const minMatch = s.match(/(\d+)\s*(?:minutes?|mins?|m)\b/);
+  if (minMatch) return parseInt(minMatch[1], 10);
+  const hmMatch = s.match(/^(\d+):(\d{2})$/);
+  if (hmMatch) return parseInt(hmMatch[1], 10) * 60 + parseInt(hmMatch[2], 10);
+  return null;
 }
 
 // ─── Raw item extraction ───────────────────────────────────────────────────────
 
 interface RawItem {
   time?: string;
+  durationMinutes: number;
   color: string;
   title: string;
   details: string[];
@@ -122,6 +113,7 @@ function collectRawItems(events: TimelineEvent[], dayActivities: Activity[]): Ra
         const f = e as FlightDepartureEvent;
         raw.push({
           time: f.time,
+          durationMinutes: MARKER_DEFAULT_MIN,
           color: C.flightBlue,
           title: `Depart ${f.flightNo} · ${f.departureAirport} → ${f.arrivalAirport}`,
           details: [
@@ -131,14 +123,15 @@ function collectRawItems(events: TimelineEvent[], dayActivities: Activity[]): Ra
         });
       } else if (e.subtype === 'arrival') {
         const f = e as FlightArrivalEvent;
-        raw.push({ time: f.time, color: C.flightBlue, title: `Arrive ${f.flightNo} · ${f.arrivalAirport}`, details: [] });
+        raw.push({ time: f.time, durationMinutes: MARKER_DEFAULT_MIN, color: C.flightBlue, title: `Arrive ${f.flightNo} · ${f.arrivalAirport}`, details: [] });
       } else {
         const f = e as FlightConnectionEvent;
         raw.push({
           time: f.time,
+          durationMinutes: f.layoverMinutes ?? MARKER_DEFAULT_MIN,
           color: C.flightBlue,
           title: `Connection · ${f.connectionAirport}`,
-          details: [f.layoverMinutes ? `${Math.floor(f.layoverMinutes / 60)}h ${f.layoverMinutes % 60}m layover` : ''],
+          details: [],
         });
       }
     } else if (e.type === 'hotel') {
@@ -146,13 +139,14 @@ function collectRawItems(events: TimelineEvent[], dayActivities: Activity[]): Ra
         const h = e as HotelCheckInEvent;
         raw.push({
           time: h.time,
+          durationMinutes: MARKER_DEFAULT_MIN,
           color: C.hotelTerra,
           title: `Check in · ${h.hotelName}`,
           details: [h.locationAddress ?? '', h.bookingRef ? `Ref: ${h.bookingRef}` : ''],
         });
       } else {
         const h = e as HotelCheckOutEvent;
-        raw.push({ time: h.time, color: C.hotelTerra, title: `Check out · ${h.hotelName}`, details: [] });
+        raw.push({ time: h.time, durationMinutes: MARKER_DEFAULT_MIN, color: C.hotelTerra, title: `Check out · ${h.hotelName}`, details: [] });
       }
     } else if (e.type === 'otherTransportation') {
       const t = e as TransportDepartureEvent | TransportArrivalEvent;
@@ -162,6 +156,7 @@ function collectRawItems(events: TimelineEvent[], dayActivities: Activity[]): Ra
         : `Arrive · ${t.arrivalLocation}`;
       raw.push({
         time: t.time,
+        durationMinutes: MARKER_DEFAULT_MIN,
         color: C.flightBlue,
         title,
         details: [t.locationAddress ?? '', [t.vendor, t.bookingRef && `Ref: ${t.bookingRef}`].filter(Boolean).join(' · ')],
@@ -170,12 +165,10 @@ function collectRawItems(events: TimelineEvent[], dayActivities: Activity[]): Ra
       const a = e as ActivityEvent;
       raw.push({
         time: a.time,
+        durationMinutes: parseDurationMinutes(a.duration) ?? ACTIVITY_DEFAULT_MIN,
         color: C.activityGreen,
         title: a.description,
-        details: [
-          [a.duration, a.cost ? fmtCost(a.cost) : ''].filter(Boolean).join(' · '),
-          a.locationAddress ?? '',
-        ],
+        details: [a.cost ? fmtCost(a.cost) : '', a.locationAddress ?? '', a.bookingRef ? `Ref: ${a.bookingRef}` : ''],
       });
     }
   }
@@ -183,136 +176,238 @@ function collectRawItems(events: TimelineEvent[], dayActivities: Activity[]): Ra
   for (const a of dayActivities) {
     raw.push({
       time: a.scheduledTime,
+      durationMinutes: parseDurationMinutes(a.duration) ?? ACTIVITY_DEFAULT_MIN,
       color: C.activityGreen,
       title: a.name,
-      details: [a.duration ?? '', a.address ?? ''],
+      details: [a.estimatedCost ?? '', a.address ?? ''],
     });
   }
 
   return raw;
 }
 
-/** Buckets a day's raw items into the "Anytime" row and per-hour rows. */
-function bucketItems(
-  raw: RawItem[],
+// ─── Overlap layout (Outlook-style side-by-side lanes) ────────────────────────
+
+interface TimedItem extends RawItem {
+  startRel: number; // minutes from grid start
+  endRel: number;
+}
+
+interface LaidOutItem extends TimedItem {
+  lane: number;
+  clusterLanes: number;
+}
+
+/** Greedy interval-graph coloring, scoped per overlap cluster so unrelated events keep full width. */
+function layoutLanes(items: TimedItem[]): LaidOutItem[] {
+  const sorted = [...items].sort((a, b) => a.startRel - b.startRel);
+  const result: LaidOutItem[] = [];
+  let clusterStart = 0;
+  let clusterEndMax = -Infinity;
+  let laneEnds: number[] = [];
+
+  const flushCluster = (endIdx: number) => {
+    const cluster = result.slice(clusterStart, endIdx);
+    const maxLanes = cluster.length ? Math.max(...cluster.map((it) => it.lane)) + 1 : 1;
+    for (const it of cluster) it.clusterLanes = maxLanes;
+  };
+
+  for (const item of sorted) {
+    if (item.startRel >= clusterEndMax) {
+      flushCluster(result.length);
+      clusterStart = result.length;
+      laneEnds = [];
+      clusterEndMax = -Infinity;
+    }
+    let lane = laneEnds.findIndex((end) => end <= item.startRel);
+    if (lane === -1) {
+      lane = laneEnds.length;
+      laneEnds.push(item.endRel);
+    } else {
+      laneEnds[lane] = item.endRel;
+    }
+    clusterEndMax = Math.max(clusterEndMax, item.endRel);
+    result.push({ ...item, lane, clusterLanes: 1 });
+  }
+  flushCluster(result.length);
+
+  return result;
+}
+
+// ─── Day column rendering (absolute-positioned) ────────────────────────────────
+
+// All three event colors (flightBlue, hotelTerra, activityGreen) are dark enough for white text.
+const EVENT_TEXT_COLOR = '#FFFFFF';
+
+function agendaDayColumn(
+  contentDay: ContentDay,
+  x0: number,
+  y0: number,
+  colW: number,
   startHour: number,
   endHour: number,
-): { anytime: Content[]; byHour: Map<number, Content[]> } {
-  const anytimeSorted: { sortKey: number; card: Content }[] = [];
-  const byHourSorted = new Map<number, { sortKey: number; card: Content }[]>();
+): Content[] {
+  const items: Content[] = [];
+  const gridBottomMax = y0 + CONTENT_H;
+
+  // ── Header ──────────────────────────────────────────────────────────────────
+  const city = contentDay.events.find((e) => e.locationCity)?.locationCity ?? '';
+  items.push({
+    canvas: [{ type: 'rect', x: 0, y: 0, w: 3, h: HEADER_H - 4, color: C.yellow }],
+    absolutePosition: { x: x0, y: y0 },
+  } as unknown as Content);
+  items.push({
+    text: `Day ${contentDay.dayNumber}  ·  ${fmtDateMed(contentDay.day)}${city ? `  ·  ${city}` : ''}`,
+    font: 'Times', fontSize: 11, bold: true, color: C.nearBlack,
+    absolutePosition: { x: x0 + 10, y: y0 + 2 },
+    width: colW - 10,
+  } as unknown as Content);
+
+  // ── Classify raw items into the timed grid vs. the "Other" strip ───────────
+  const raw = collectRawItems(contentDay.events, contentDay.dayActivities);
+  const gridStartMin = startHour * 60;
+  const gridEndMin = endHour * 60;
+  const totalGridMin = gridEndMin - gridStartMin;
+
+  const timed: TimedItem[] = [];
+  const other: { sortKey: number; label: string }[] = [];
 
   for (const item of raw) {
-    const hour = parseHour(item.time);
-    const timeLabel = item.time ? fmtTime(item.time) : '';
-    const card = miniCard(item.color, timeLabel, item.title, item.details);
-
-    if (hour === null || hour < startHour) {
-      anytimeSorted.push({ sortKey: hour === null ? -1 : hour * 60, card });
+    const startMin = parseTimeMinutes(item.time);
+    if (startMin === null || startMin < gridStartMin || startMin >= gridEndMin) {
+      const timeLabel = item.time ? fmtTime(item.time) : '';
+      other.push({ sortKey: startMin ?? -1, label: timeLabel ? `${timeLabel} — ${item.title}` : item.title });
       continue;
     }
-    const bucketHour = Math.min(hour, endHour - 1);
-    const minute = Number(item.time?.split(':')[1]) || 0;
-    const arr = byHourSorted.get(bucketHour) ?? [];
-    arr.push({ sortKey: hour * 60 + minute, card });
-    byHourSorted.set(bucketHour, arr);
+    const startRel = startMin - gridStartMin;
+    const durationClamped = Math.max(item.durationMinutes, MIN_BLOCK_MIN);
+    const endRel = Math.min(startRel + durationClamped, totalGridMin);
+    timed.push({ ...item, startRel, endRel });
+  }
+  other.sort((a, b) => a.sortKey - b.sortKey);
+
+  // ── "Other" strip (untimed / outside the selected hours) ──────────────────
+  let gridTop = y0 + HEADER_H;
+  if (other.length > 0) {
+    const text = 'Also: ' + other.map((o) => o.label).join('  ·  ');
+    items.push({
+      text,
+      fontSize: 6.3,
+      color: C.muted,
+      absolutePosition: { x: x0, y: gridTop },
+      width: colW,
+      lineHeight: 1.1,
+    } as unknown as Content);
+    gridTop += ANYTIME_LINE_H;
   }
 
-  anytimeSorted.sort((a, b) => a.sortKey - b.sortKey);
-  const byHour = new Map<number, Content[]>();
-  for (const [hour, items] of byHourSorted) {
-    items.sort((a, b) => a.sortKey - b.sortKey);
-    byHour.set(hour, items.map((i) => i.card));
+  // ── Grid geometry ───────────────────────────────────────────────────────────
+  // Defensively clamp to whatever vertical room is actually left in this column
+  // (normally the full requested range fits — this only bites if an unusually
+  // long "Also:" line wrapped to extra lines) so the grid can never bleed past
+  // the half-page it's confined to.
+  const idealSlots = Math.round(totalGridMin / 30);
+  const maxSlotsFit = Math.max(0, Math.floor((gridBottomMax - gridTop) / SLOT_H));
+  const numSlots = Math.min(idealSlots, maxSlotsFit);
+  const gridH = numSlots * SLOT_H;
+  const gridBottom = gridTop + gridH;
+  const eventAreaX = x0 + LABEL_W + 3;
+  const eventAreaW = colW - LABEL_W - 6;
+  // Hours actually rendered — normally equals (endHour - startHour), but if the
+  // defensive clamp above kicked in, don't draw labels/shading past what fits.
+  const numHoursRendered = Math.floor(numSlots / 2);
+
+  // Zebra shading on alternate hours (full column width, behind everything else)
+  for (let h = 0; h < numHoursRendered; h++) {
+    if (h % 2 !== 0) continue;
+    items.push({
+      canvas: [{ type: 'rect', x: 0, y: 0, w: colW, h: SLOT_H * 2, color: C.surface }],
+      absolutePosition: { x: x0, y: gridTop + h * 2 * SLOT_H },
+    } as unknown as Content);
   }
 
-  return { anytime: anytimeSorted.map((i) => i.card), byHour };
-}
+  // Perimeter + half-hour rules + vertical divider
+  items.push({
+    canvas: [{ type: 'rect', x: 0, y: 0, w: colW, h: gridH, lineWidth: 0.75, lineColor: C.border }],
+    absolutePosition: { x: x0, y: gridTop },
+  } as unknown as Content);
+  for (let slot = 1; slot < numSlots; slot++) {
+    const isHour = slot % 2 === 0;
+    items.push({
+      canvas: [{ type: 'line', x1: 0, y1: 0, x2: colW, y2: 0, lineWidth: isHour ? 0.75 : 0.4, lineColor: C.border }],
+      absolutePosition: { x: x0, y: gridTop + slot * SLOT_H },
+    } as unknown as Content);
+  }
+  items.push({
+    canvas: [{ type: 'line', x1: 0, y1: 0, x2: 0, y2: gridH, lineWidth: 0.75, lineColor: C.border }],
+    absolutePosition: { x: x0 + LABEL_W, y: gridTop },
+  } as unknown as Content);
 
-// ─── Day column ────────────────────────────────────────────────────────────────
+  // Hour labels, vertically centered in their 2-slot band
+  for (let h = 0; h < numHoursRendered; h++) {
+    items.push({
+      text: fmtHourLabel(startHour + h),
+      fontSize: 6.8,
+      bold: true,
+      color: C.nearBlack,
+      absolutePosition: { x: x0 + 3, y: gridTop + h * 2 * SLOT_H + SLOT_H - 4 },
+      width: LABEL_W - 5,
+    } as unknown as Content);
+  }
 
-function agendaDayHeader(contentDay: ContentDay): Content {
-  const city = contentDay.events.find((e) => e.locationCity)?.locationCity ?? '';
-  return {
-    table: {
-      widths: [3, '*'],
-      body: [[
-        { border: [false, false, false, false], fillColor: C.yellow, text: '' },
-        {
-          border: [false, false, false, false],
-          fillColor: C.surface,
-          stack: [
-            { text: `Day ${contentDay.dayNumber}  ·  ${fmtDateMed(contentDay.day)}`, font: 'Times', fontSize: 12, bold: true, color: C.nearBlack, margin: [0, 0, 0, city ? 1 : 0] },
-            ...(city ? [{ text: city, fontSize: 8, color: C.muted }] : []),
-          ],
-          margin: [8, 5, 8, 5],
-        },
-      ]],
-    },
-    layout: { defaultBorder: false, paddingLeft: () => 0, paddingRight: () => 0, paddingTop: () => 0, paddingBottom: () => 0 },
-    margin: [0, 0, 0, 8],
-  } as unknown as Content;
-}
+  // ── Event blocks, side-by-side within overlap clusters ─────────────────────
+  const laidOut = layoutLanes(timed);
+  const pxPerMin = SLOT_H / 30;
+  for (const it of laidOut) {
+    const laneW = (eventAreaW - LANE_GAP * (it.clusterLanes - 1)) / it.clusterLanes;
+    const x = eventAreaX + it.lane * (laneW + LANE_GAP);
+    const y = Math.min(gridTop + it.startRel * pxPerMin, gridBottom);
+    const h = Math.min(gridTop + it.endRel * pxPerMin, gridBottom) - y;
+    if (h <= 0) continue;
 
-function buildHourTable(
-  startHour: number,
-  endHour: number,
-  anytime: Content[],
-  byHour: Map<number, Content[]>,
-  anytimeRowH: number,
-  hourRowH: number,
-): Content {
-  const hours: number[] = [];
-  for (let h = startHour; h < endHour; h++) hours.push(h);
+    items.push({
+      canvas: [{ type: 'rect', x: 0, y: 0, w: laneW, h, r: 1.5, color: it.color }],
+      absolutePosition: { x, y },
+    } as unknown as Content);
 
-  const body = [
-    [
-      { text: 'ANYTIME', fontSize: 6.5, bold: true, color: C.muted, margin: [4, 4, 2, 0] },
-      { stack: anytime, margin: [4, 3, 4, 3] },
-    ],
-    ...hours.map((h) => [
-      { text: fmtHourLabel(h), fontSize: 7.5, bold: true, color: C.nearBlack, margin: [4, 4, 2, 0] },
-      { stack: byHour.get(h) ?? [], margin: [4, 3, 4, 3] },
-    ]),
-  ] as unknown as Content[][];
+    const timeLabel = it.time ? fmtTime(it.time) : '';
+    items.push({
+      text: timeLabel ? `${timeLabel}  ${it.title}` : it.title,
+      fontSize: 6.6,
+      bold: true,
+      color: EVENT_TEXT_COLOR,
+      absolutePosition: { x: x + 3, y: y + 1.5 },
+      width: Math.max(laneW - 6, 4),
+      lineHeight: 1.05,
+    } as unknown as Content);
 
-  const heights = [anytimeRowH, ...hours.map(() => hourRowH)];
+    const detail = it.details.filter(Boolean).join(' · ');
+    if (detail && h >= 24) {
+      items.push({
+        text: detail,
+        fontSize: 5.8,
+        color: '#F3F4F6',
+        absolutePosition: { x: x + 3, y: y + 10 },
+        width: Math.max(laneW - 6, 4),
+        lineHeight: 1.0,
+      } as unknown as Content);
+    }
+  }
 
-  return {
-    table: { widths: [LABEL_W, '*'], heights, body },
-    layout: {
-      hLineWidth: (i: number) => (i <= 1 ? 1 : 0.5),
-      hLineColor: (i: number) => (i <= 1 ? C.nearBlack : C.border),
-      vLineWidth: (i: number) => (i === 1 ? 0.75 : 0),
-      vLineColor: () => C.border,
-      fillColor: (i: number) => (i === 0 ? '#FEF9E7' : i % 2 === 0 ? C.surface : null),
-      paddingLeft: () => 0, paddingRight: () => 0, paddingTop: () => 0, paddingBottom: () => 0,
-    },
-  } as unknown as Content;
-}
-
-function buildAgendaDayColumn(
-  contentDay: ContentDay,
-  startHour: number,
-  endHour: number,
-  anytimeRowH: number,
-  hourRowH: number,
-): Content {
-  const raw = collectRawItems(contentDay.events, contentDay.dayActivities);
-  const { anytime, byHour } = bucketItems(raw, startHour, endHour);
-  const table = buildHourTable(startHour, endHour, anytime, byHour, anytimeRowH, hourRowH);
-  return { stack: [agendaDayHeader(contentDay), table] };
+  return items;
 }
 
 // ─── Render entry point ───────────────────────────────────────────────────────
 
-export async function renderTripAgendaPdf(payload: TripExportPayload): Promise<Buffer> {
+export async function renderTripAgendaPdf(
+  payload: TripExportPayload,
+  opts?: { startHour?: number; endHour?: number },
+): Promise<Buffer> {
+  const { startHour, endHour } = clampHourRange(opts?.startHour, opts?.endHour);
   const contentDays = buildContentDays(payload);
-  const startHour = AGENDA_START_HOUR;
-  const endHour = computeAgendaEndHour(payload);
 
-  const totalHourRows = endHour - startHour;
-  const unit = GRID_H / (ANYTIME_WEIGHT + totalHourRows);
-  const hourRowH = Math.floor(unit);
-  const anytimeRowH = Math.floor(unit * ANYTIME_WEIGHT);
+  const pageContentW = PAGE_W - MARGIN * 2;
+  const dayColW = (pageContentW - COL_GAP) / 2;
 
   const items: Content[] = [];
 
@@ -323,19 +418,23 @@ export async function renderTripAgendaPdf(payload: TripExportPayload): Promise<B
   for (let i = 0; i < contentDays.length; i += 2) {
     const a = contentDays[i];
     const b = contentDays[i + 1];
-    const colA = buildAgendaDayColumn(a, startHour, endHour, anytimeRowH, hourRowH);
-    const colB = b ? buildAgendaDayColumn(b, startHour, endHour, anytimeRowH, hourRowH) : ({ text: '' } as Content);
 
-    const pair: Content = {
-      columns: [
-        { width: '*', stack: [colA] },
-        { width: COL_GAP, text: '' },
-        { width: '*', stack: [colB] },
-      ],
-    } as unknown as Content;
+    const leftX = MARGIN;
+    const rightX = MARGIN + dayColW + COL_GAP;
+    const y0 = MARGIN;
 
-    if (i === 0) items.push(pair);
-    else items.push(Object.assign(pair as object, { pageBreak: 'before' }) as Content);
+    const colAItems = agendaDayColumn(a, leftX, y0, dayColW, startHour, endHour);
+    const colBItems = b ? agendaDayColumn(b, rightX, y0, dayColW, startHour, endHour) : [];
+
+    const pageItems = [...colAItems, ...colBItems];
+    if (i === 0) {
+      items.push(...pageItems);
+    } else {
+      // Force a page break before this pair's first item; the rest are plain
+      // absolute items and don't affect the flow cursor.
+      items.push(Object.assign({ text: '' } as object, { pageBreak: 'before' }) as Content);
+      items.push(...pageItems);
+    }
   }
 
   const printer = createPrinter();

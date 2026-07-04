@@ -4,12 +4,26 @@ import { useState } from 'react';
 import { Download, FileText, FileArchive, BookOpen, CalendarClock, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import { Select } from '@/components/ui/select';
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+
+// Largest hour range the agenda PDF can render without overflowing its half-page
+// column — keep this in sync with AGENDA_MAX_HOURS in services/export/pdf-agenda.ts
+// (that module is server-only and can't be imported from a client component).
+const AGENDA_MAX_HOURS = 16;
+
+function formatHourOption(hour: number): string {
+  const h = hour % 24;
+  if (h === 0) return hour === 24 ? 'Midnight' : '12:00 AM';
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const displayHour = h % 12 || 12;
+  return `${displayHour}:00 ${ampm}`;
+}
 
 interface Props {
   open: boolean;
@@ -64,12 +78,23 @@ const FORMATS: Array<{
 
 export function ExportModal({ open, onClose, tripId, tripName }: Props) {
   const [loading, setLoading] = useState<Format | null>(null);
+  const [agendaStart, setAgendaStart] = useState(8);
+  const [agendaEnd, setAgendaEnd] = useState(20);
+
+  const maxEnd = Math.min(24, agendaStart + AGENDA_MAX_HOURS);
+  const endOptions = Array.from({ length: maxEnd - agendaStart }, (_, i) => agendaStart + i + 1);
+
+  function handleStartChange(value: number) {
+    setAgendaStart(value);
+    setAgendaEnd((prevEnd) => Math.min(Math.max(prevEnd, value + 1), value + AGENDA_MAX_HOURS, 24));
+  }
 
   async function handleDownload(format: Format) {
     if (loading) return;
     setLoading(format);
     try {
-      const res = await fetch(`/api/trips/${tripId}/export?format=${format}`);
+      const query = format === 'agenda' ? `&startHour=${agendaStart}&endHour=${agendaEnd}` : '';
+      const res = await fetch(`/api/trips/${tripId}/export?format=${format}${query}`);
       if (!res.ok) {
         const data = (await res.json()) as { error?: string };
         throw new Error(data.error ?? 'Export failed');
@@ -136,6 +161,31 @@ export function ExportModal({ open, onClose, tripId, tripName }: Props) {
                     </p>
                   </div>
                 </div>
+                {fmt.id === 'agenda' && (
+                  <div className="mt-3 flex items-center gap-2">
+                    <Select
+                      className="h-8 w-auto text-xs"
+                      value={agendaStart}
+                      onChange={(e) => handleStartChange(Number(e.target.value))}
+                      aria-label="Agenda start time"
+                    >
+                      {Array.from({ length: 24 }, (_, h) => h).map((h) => (
+                        <option key={h} value={h}>{formatHourOption(h)}</option>
+                      ))}
+                    </Select>
+                    <span className="type-caption">to</span>
+                    <Select
+                      className="h-8 w-auto text-xs"
+                      value={agendaEnd}
+                      onChange={(e) => setAgendaEnd(Number(e.target.value))}
+                      aria-label="Agenda end time"
+                    >
+                      {endOptions.map((h) => (
+                        <option key={h} value={h}>{formatHourOption(h)}</option>
+                      ))}
+                    </Select>
+                  </div>
+                )}
                 <div className="mt-3 flex justify-end">
                   <Button
                     size="sm"
