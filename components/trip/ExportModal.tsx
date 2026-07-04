@@ -13,11 +13,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 
-// Largest hour range the agenda PDF can render without overflowing its half-page
-// column — keep this in sync with AGENDA_MAX_HOURS in services/export/pdf-agenda.ts
-// (that module is server-only and can't be imported from a client component).
-const AGENDA_MAX_HOURS = 16;
-
 function formatHourOption(hour: number): string {
   const h = hour % 24;
   if (h === 0) return hour === 24 ? 'Midnight' : '12:00 AM';
@@ -83,12 +78,11 @@ export function ExportModal({ open, onClose, tripId, tripName }: Props) {
   const [agendaEnd, setAgendaEnd] = useState(20);
   const [agendaBooklet, setAgendaBooklet] = useState(false);
 
-  const maxEnd = Math.min(24, agendaStart + AGENDA_MAX_HOURS);
-  const endOptions = Array.from({ length: maxEnd - agendaStart }, (_, i) => agendaStart + i + 1);
+  const endOptions = Array.from({ length: 24 - agendaStart }, (_, i) => agendaStart + i + 1);
 
   function handleStartChange(value: number) {
     setAgendaStart(value);
-    setAgendaEnd((prevEnd) => Math.min(Math.max(prevEnd, value + 1), value + AGENDA_MAX_HOURS, 24));
+    setAgendaEnd((prevEnd) => Math.min(Math.max(prevEnd, value + 1), 24));
   }
 
   async function handleDownload(format: Format) {

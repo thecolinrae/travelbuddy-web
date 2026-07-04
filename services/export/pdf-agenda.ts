@@ -1,20 +1,24 @@
 /**
  * Agenda PDF export — a printable day-planner view, adapted from Outlook-style
- * schedule editors for paper: landscape orientation, two days per page (each
- * confined to its own half of the page — left/right columns), a ruled
+ * schedule editors for paper: landscape orientation, two "leaves" per physical
+ * page (each confined to its own half — left/right columns), a ruled
  * half-hour grid with times down the side, and events drawn as colored blocks
  * stretching from start time to finish time. Overlapping events split into
  * side-by-side lanes instead of stacking, so a busy hour never grows taller
- * than the fixed slot height.
+ * than a single row.
  *
- * The hour range (e.g. 8am–8pm) is chosen by the caller before generating —
- * see AGENDA_MAX_HOURS below for the largest range that still fits within a
- * single half-page column without overflowing.
+ * The hour range (e.g. 8am–8pm) is chosen by the caller before generating.
+ * The half-hour row height is *not* fixed — it's derived from the chosen
+ * range so the grid always fills the available column height exactly,
+ * whether that's a tight 8am–midnight or a spacious 9am–6pm.
+ *
+ * The first two leaves are always a Quick Reference summary (flights, ground
+ * transport, hotels), same idea as the trip binder's Quick Reference page.
  *
  * An optional "booklet" mode reorders the physical pages into saddle-stitch
  * signature order, so printing double-sided and folding the whole stack in
  * half along the vertical centerline (then stapling the spine) produces a
- * booklet that reads in the correct day order — see buildBookletPageSlots.
+ * booklet that reads in the correct order — see buildBookletPageSlots.
  */
 
 import type { TripExportPayload } from './json';
@@ -31,7 +35,7 @@ import type {
   TransportDepartureEvent,
 } from '@/types';
 import type { Content, TDocumentDefinitions, ContentDay } from './pdf-shared';
-import { createPrinter, C, fmtDateMed, fmtTime, fmtCost, buildContentDays } from './pdf-shared';
+import { createPrinter, C, fmtDateShort, fmtDateMed, fmtTime, fmtCost, buildContentDays } from './pdf-shared';
 
 // US Letter, landscape (11in × 8.5in)
 const PAGE_W = 792;
@@ -42,19 +46,14 @@ const COL_GAP = 22;
 
 const CONTENT_H = PAGE_H - MARGIN * 2 - FOOTER_EXTRA;
 
-const HEADER_H = 26; // day header block
-const ANYTIME_LINE_H = 12; // per line, only reserved when there's untimed/out-of-range content
+const HEADER_H = 26; // leaf header block
+// Always reserved (whether used or not) so the grid starts at the same fixed
+// offset on every day, which in turn lets the half-hour row height be derived
+// once for the whole document instead of guessed per-day.
+const RESERVED_TOP_H = 24; // ~2 lines of "Also:" text
 
-// Fixed, never-adaptive slot height — every half hour renders identically no
-// matter how many hours are shown or how busy a day is. This is the number
-// that "each day should not extend off its half page" is built around.
-const SLOT_H = 15; // pt per half-hour
 export const AGENDA_DEFAULT_START_HOUR = 8;
 export const AGENDA_DEFAULT_END_HOUR = 20;
-// Largest range guaranteed to fit in one column without overflowing. Reserves
-// room for up to 2 lines of "Also:" text so a busy Anytime strip never pushes
-// the grid past the bottom margin.
-export const AGENDA_MAX_HOURS = Math.floor((CONTENT_H - HEADER_H - ANYTIME_LINE_H * 2) / (2 * SLOT_H));
 
 const LABEL_W = 30; // hour-label gutter width
 const LANE_GAP = 2; // px gap between side-by-side overlapping event blocks
@@ -67,7 +66,6 @@ function clampHourRange(startHour?: number, endHour?: number): { startHour: numb
   start = Math.max(0, Math.min(23, start));
   let end = Number.isInteger(endHour) ? (endHour as number) : start + (AGENDA_DEFAULT_END_HOUR - AGENDA_DEFAULT_START_HOUR);
   end = Math.max(start + 1, Math.min(24, end));
-  if (end - start > AGENDA_MAX_HOURS) end = start + AGENDA_MAX_HOURS;
   return { startHour: start, endHour: end };
 }
 
@@ -97,6 +95,14 @@ function parseDurationMinutes(duration: string | undefined): number | null {
   const hmMatch = s.match(/^(\d+):(\d{2})$/);
   if (hmMatch) return parseInt(hmMatch[1], 10) * 60 + parseInt(hmMatch[2], 10);
   return null;
+}
+
+/** Rough estimate of how many lines `text` will wrap to at `fontSize` within `width` pt. */
+function estimateLineCount(text: string, fontSize: number, width: number): number {
+  if (!text) return 0;
+  const avgCharW = fontSize * 0.52; // rough average glyph width for Helvetica at small sizes
+  const charsPerLine = Math.max(1, Math.floor(width / avgCharW));
+  return Math.max(1, Math.ceil(text.length / charsPerLine));
 }
 
 // ─── Raw item extraction ───────────────────────────────────────────────────────
@@ -251,9 +257,9 @@ function agendaDayColumn(
   colW: number,
   startHour: number,
   endHour: number,
+  slotH: number,
 ): Content[] {
   const items: Content[] = [];
-  const gridBottomMax = y0 + CONTENT_H;
 
   // ── Header ──────────────────────────────────────────────────────────────────
   const city = contentDay.events.find((e) => e.locationCity)?.locationCity ?? '';
@@ -291,43 +297,36 @@ function agendaDayColumn(
   }
   other.sort((a, b) => a.sortKey - b.sortKey);
 
-  // ── "Other" strip (untimed / outside the selected hours) ──────────────────
-  let gridTop = y0 + HEADER_H;
+  // ── "Other" strip (untimed / outside the selected hours) — always rendered
+  // into the same reserved band, whether it has content or not, so the grid
+  // below always starts at the same fixed offset regardless of this day's content.
   if (other.length > 0) {
-    const text = 'Also: ' + other.map((o) => o.label).join('  ·  ');
     items.push({
-      text,
+      text: 'Also: ' + other.map((o) => o.label).join('  ·  '),
       fontSize: 6.3,
       color: C.muted,
-      absolutePosition: { x: x0, y: gridTop },
+      absolutePosition: { x: x0, y: y0 + HEADER_H },
       width: colW,
       lineHeight: 1.1,
     } as unknown as Content);
-    gridTop += ANYTIME_LINE_H;
   }
 
-  // ── Grid geometry ───────────────────────────────────────────────────────────
-  // Defensively clamp to whatever vertical room is actually left in this column
-  // (normally the full requested range fits — this only bites if an unusually
-  // long "Also:" line wrapped to extra lines) so the grid can never bleed past
-  // the half-page it's confined to.
-  const idealSlots = Math.round(totalGridMin / 30);
-  const maxSlotsFit = Math.max(0, Math.floor((gridBottomMax - gridTop) / SLOT_H));
-  const numSlots = Math.min(idealSlots, maxSlotsFit);
-  const gridH = numSlots * SLOT_H;
-  const gridBottom = gridTop + gridH;
+  // ── Grid geometry — slotH is derived from the chosen hour range so the grid
+  // always fills exactly the space between the header and the footer margin,
+  // whether that's 24 half-hour slots (8am-8pm) or 32 (8am-midnight).
+  const gridTop = y0 + HEADER_H + RESERVED_TOP_H;
+  const numSlots = (endHour - startHour) * 2;
+  const gridH = numSlots * slotH;
   const eventAreaX = x0 + LABEL_W + 3;
   const eventAreaW = colW - LABEL_W - 6;
-  // Hours actually rendered — normally equals (endHour - startHour), but if the
-  // defensive clamp above kicked in, don't draw labels/shading past what fits.
-  const numHoursRendered = Math.floor(numSlots / 2);
+  const numHours = endHour - startHour;
 
   // Zebra shading on alternate hours (full column width, behind everything else)
-  for (let h = 0; h < numHoursRendered; h++) {
+  for (let h = 0; h < numHours; h++) {
     if (h % 2 !== 0) continue;
     items.push({
-      canvas: [{ type: 'rect', x: 0, y: 0, w: colW, h: SLOT_H * 2, color: C.surface }],
-      absolutePosition: { x: x0, y: gridTop + h * 2 * SLOT_H },
+      canvas: [{ type: 'rect', x: 0, y: 0, w: colW, h: slotH * 2, color: C.surface }],
+      absolutePosition: { x: x0, y: gridTop + h * 2 * slotH },
     } as unknown as Content);
   }
 
@@ -340,7 +339,7 @@ function agendaDayColumn(
     const isHour = slot % 2 === 0;
     items.push({
       canvas: [{ type: 'line', x1: 0, y1: 0, x2: colW, y2: 0, lineWidth: isHour ? 0.75 : 0.4, lineColor: C.border }],
-      absolutePosition: { x: x0, y: gridTop + slot * SLOT_H },
+      absolutePosition: { x: x0, y: gridTop + slot * slotH },
     } as unknown as Content);
   }
   items.push({
@@ -349,25 +348,25 @@ function agendaDayColumn(
   } as unknown as Content);
 
   // Hour labels, vertically centered in their 2-slot band
-  for (let h = 0; h < numHoursRendered; h++) {
+  for (let h = 0; h < numHours; h++) {
     items.push({
       text: fmtHourLabel(startHour + h),
       fontSize: 6.8,
       bold: true,
       color: C.nearBlack,
-      absolutePosition: { x: x0 + 3, y: gridTop + h * 2 * SLOT_H + SLOT_H - 4 },
+      absolutePosition: { x: x0 + 3, y: gridTop + h * 2 * slotH + slotH - 4 },
       width: LABEL_W - 5,
     } as unknown as Content);
   }
 
   // ── Event blocks, side-by-side within overlap clusters ─────────────────────
   const laidOut = layoutLanes(timed);
-  const pxPerMin = SLOT_H / 30;
+  const pxPerMin = slotH / 30;
   for (const it of laidOut) {
     const laneW = (eventAreaW - LANE_GAP * (it.clusterLanes - 1)) / it.clusterLanes;
     const x = eventAreaX + it.lane * (laneW + LANE_GAP);
-    const y = Math.min(gridTop + it.startRel * pxPerMin, gridBottom);
-    const h = Math.min(gridTop + it.endRel * pxPerMin, gridBottom) - y;
+    const y = gridTop + it.startRel * pxPerMin;
+    const h = gridTop + it.endRel * pxPerMin - y;
     if (h <= 0) continue;
 
     items.push({
@@ -375,28 +374,145 @@ function agendaDayColumn(
       absolutePosition: { x, y },
     } as unknown as Content);
 
+    const textW = Math.max(laneW - 6, 4);
     const timeLabel = it.time ? fmtTime(it.time) : '';
+    const titleStr = timeLabel ? `${timeLabel}  ${it.title}` : it.title;
+    const titleFontSize = 6.6;
+    const titleLineH = titleFontSize * 1.05;
+    const titleBlockH = estimateLineCount(titleStr, titleFontSize, textW) * titleLineH;
+
     items.push({
-      text: timeLabel ? `${timeLabel}  ${it.title}` : it.title,
-      fontSize: 6.6,
+      text: titleStr,
+      fontSize: titleFontSize,
       bold: true,
       color: EVENT_TEXT_COLOR,
       absolutePosition: { x: x + 3, y: y + 1.5 },
-      width: Math.max(laneW - 6, 4),
+      width: textW,
       lineHeight: 1.05,
     } as unknown as Content);
 
-    const detail = it.details.filter(Boolean).join(' · ');
-    if (detail && h >= 24) {
+    // Fit as many wrapped detail lines as the block's actual height allows —
+    // a 30-minute block shows nothing extra, a 3-hour one can show them all.
+    let cursorY = y + 1.5 + titleBlockH + 1.5;
+    const detailFontSize = 5.8;
+    const detailLineH = detailFontSize * 1.15;
+    for (const detail of it.details.filter(Boolean)) {
+      const neededH = estimateLineCount(detail, detailFontSize, textW) * detailLineH;
+      if (cursorY + neededH > y + h - 1) break;
       items.push({
         text: detail,
-        fontSize: 5.8,
+        fontSize: detailFontSize,
         color: '#F3F4F6',
-        absolutePosition: { x: x + 3, y: y + 10 },
-        width: Math.max(laneW - 6, 4),
-        lineHeight: 1.0,
+        absolutePosition: { x: x + 3, y: cursorY },
+        width: textW,
+        lineHeight: 1.15,
       } as unknown as Content);
+      cursorY += neededH;
     }
+  }
+
+  return items;
+}
+
+// ─── Quick Reference leaves (flights / ground transport / hotels) ─────────────
+// Mirrors the trip binder's Quick Reference page, sized to a single half-page
+// leaf. Rows are capped so the leaf's height is predictable — required for
+// booklet mode, where every leaf must be exactly one signature slot.
+
+function staticCard(x: number, y: number, width: number, color: string, title: string, detail: string): { items: Content[]; height: number } {
+  const titleFontSize = 7;
+  const detailFontSize = 6.2;
+  const textW = width - 8;
+  const titleH = estimateLineCount(title, titleFontSize, textW) * titleFontSize * 1.15;
+  const hasDetail = !!detail;
+  const detailH = hasDetail ? estimateLineCount(detail, detailFontSize, textW) * detailFontSize * 1.15 : 0;
+  const pad = 3;
+  const totalH = pad * 2 + titleH + (hasDetail ? 2 + detailH : 0);
+
+  const items: Content[] = [
+    { canvas: [{ type: 'rect', x: 0, y: 0, w: 2.5, h: totalH, color }], absolutePosition: { x, y } } as unknown as Content,
+    { text: title, fontSize: titleFontSize, bold: true, color: C.nearBlack, absolutePosition: { x: x + 7, y: y + pad }, width: textW, lineHeight: 1.15 } as unknown as Content,
+    ...(hasDetail ? [{ text: detail, fontSize: detailFontSize, color: C.muted, absolutePosition: { x: x + 7, y: y + pad + titleH + 2 }, width: textW, lineHeight: 1.15 } as unknown as Content] : []),
+  ];
+  return { items, height: totalH + 5 };
+}
+
+function leafHeader(x0: number, y0: number, colW: number, title: string, subtitle: string): Content[] {
+  return [
+    { canvas: [{ type: 'rect', x: 0, y: 0, w: 3, h: HEADER_H - 4, color: C.yellow }], absolutePosition: { x: x0, y: y0 } } as unknown as Content,
+    { text: title, font: 'Times', fontSize: 12, bold: true, color: C.nearBlack, absolutePosition: { x: x0 + 10, y: y0 + 1 }, width: colW - 10 } as unknown as Content,
+    { text: subtitle, fontSize: 7.5, color: C.muted, absolutePosition: { x: x0 + 10, y: y0 + 15 }, width: colW - 10 } as unknown as Content,
+  ];
+}
+
+function quickRefFlightsLeaf(payload: TripExportPayload, x0: number, y0: number, colW: number): Content[] {
+  const { trip, timeline } = payload;
+  const byDate = (a: { date: string }, b: { date: string }) => a.date.localeCompare(b.date);
+  const flights = timeline.filter((e): e is FlightDepartureEvent => e.type === 'flight' && e.subtype === 'departure').sort(byDate);
+  const transports = timeline.filter((e): e is TransportDepartureEvent => e.type === 'otherTransportation' && e.subtype === 'departure').sort(byDate);
+
+  const items: Content[] = leafHeader(x0, y0, colW, 'Quick Reference', trip.name);
+  const bottomLimit = y0 + CONTENT_H;
+  let y = y0 + HEADER_H + 8;
+
+  const addSection = (label: string, rows: { color: string; title: string; detail: string }[]) => {
+    if (y + 10 > bottomLimit) return;
+    items.push({ text: label, fontSize: 6.5, bold: true, color: C.muted, absolutePosition: { x: x0, y }, width: colW } as unknown as Content);
+    y += 10;
+    let shown = 0;
+    for (const row of rows) {
+      const { items: cardItems, height } = staticCard(x0, y, colW, row.color, row.title, row.detail);
+      if (y + height > bottomLimit - 10) break;
+      items.push(...cardItems);
+      y += height;
+      shown++;
+    }
+    if (shown < rows.length) {
+      items.push({ text: `+${rows.length - shown} more — see full itinerary`, fontSize: 6, italics: true, color: C.muted, absolutePosition: { x: x0, y }, width: colW } as unknown as Content);
+      y += 9;
+    }
+    y += 6;
+  };
+
+  addSection('FLIGHTS', flights.map((f) => ({
+    color: C.flightBlue,
+    title: `${fmtDateShort(f.date)} · ${f.flightNo} · ${f.departureAirport} → ${f.arrivalAirport}${f.time ? ' ' + fmtTime(f.time) : ''}`,
+    detail: [f.bookingRef && `Ref: ${f.bookingRef}`, f.seatNumber && `Seat ${f.seatNumber}`].filter(Boolean).join(' · '),
+  })));
+
+  addSection('GROUND & WATER TRANSPORT', transports.map((t) => ({
+    color: C.flightBlue,
+    title: `${fmtDateShort(t.date)} · ${t.transportType.replace('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase())} · ${t.departureLocation} → ${t.arrivalLocation}`,
+    detail: [t.vendor, t.bookingRef && `Ref: ${t.bookingRef}`].filter(Boolean).join(' · '),
+  })));
+
+  return items;
+}
+
+function quickRefHotelsLeaf(payload: TripExportPayload, x0: number, y0: number, colW: number): Content[] {
+  const { trip, timeline } = payload;
+  const hotels = timeline
+    .filter((e): e is HotelCheckInEvent => e.type === 'hotel' && e.subtype === 'check_in')
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const items: Content[] = leafHeader(x0, y0, colW, 'Accommodation', trip.destination);
+  const bottomLimit = y0 + CONTENT_H;
+  let y = y0 + HEADER_H + 8;
+
+  let shown = 0;
+  for (const h of hotels) {
+    const nights = h.numberOfNights ? ` · ${h.numberOfNights} night${h.numberOfNights !== 1 ? 's' : ''}` : '';
+    const title = `${h.hotelName}${nights}`;
+    const detail = [h.locationCity, `${fmtDateShort(h.date)} – ${fmtDateShort(h.checkoutDate)}`, h.bookingRef && `Ref: ${h.bookingRef}`]
+      .filter(Boolean).join(' · ');
+    const { items: cardItems, height } = staticCard(x0, y, colW, C.hotelTerra, title, detail);
+    if (y + height > bottomLimit - 10) break;
+    items.push(...cardItems);
+    y += height;
+    shown++;
+  }
+  if (shown < hotels.length) {
+    items.push({ text: `+${hotels.length - shown} more — see full itinerary`, fontSize: 6, italics: true, color: C.muted, absolutePosition: { x: x0, y }, width: colW } as unknown as Content);
   }
 
   return items;
@@ -405,19 +521,20 @@ function agendaDayColumn(
 // ─── Booklet imposition ────────────────────────────────────────────────────────
 //
 // Fold-and-staple booklet printing needs the physical sheets in "signature"
-// order, not reading order: each landscape sheet holds 2 pages per side (4 per
-// sheet once printed double-sided), and folding a whole stack of them together
-// only reconstructs 1,2,3,4,... if the outermost sheet carries the first/last
-// pages, the next sheet in carries the next pair in from both ends, and so on.
-// This is the same imposition every "print as booklet" feature uses (Acrobat,
-// Word, pdfbook, ...): for sheet k of S = N/4 (1 = outermost), N = total pages
-// padded up to a multiple of 4 with trailing blanks:
+// order, not reading order: each landscape sheet holds 2 leaves per side (4
+// per sheet once printed double-sided), and folding a whole stack of them
+// together only reconstructs 1,2,3,4,... if the outermost sheet carries the
+// first/last leaves, the next sheet in carries the next pair in from both
+// ends, and so on. This is the same imposition every "print as booklet"
+// feature uses (Acrobat, Word, pdfbook, ...): for sheet k of S = N/4
+// (1 = outermost), N = total leaves padded up to a multiple of 4 with
+// trailing blanks:
 //   front: [N - 2k + 2, 2k - 1]      back: [2k, N - 2k + 1]
 
-function buildBookletPageSlots(numDays: number): Array<[number | null, number | null]> {
-  const N = Math.max(4, Math.ceil(numDays / 4) * 4);
+function buildBookletPageSlots(numLeaves: number): Array<[number | null, number | null]> {
+  const N = Math.max(4, Math.ceil(numLeaves / 4) * 4);
   const S = N / 4;
-  const slot = (p: number): number | null => (p <= numDays ? p - 1 : null); // p is 1-indexed; null = blank padding page
+  const slot = (p: number): number | null => (p <= numLeaves ? p - 1 : null); // p is 1-indexed; null = blank padding leaf
   const pages: Array<[number | null, number | null]> = [];
   for (let k = 1; k <= S; k++) {
     pages.push([slot(N - 2 * k + 2), slot(2 * k - 1)]); // front
@@ -427,6 +544,11 @@ function buildBookletPageSlots(numDays: number): Array<[number | null, number | 
 }
 
 // ─── Render entry point ───────────────────────────────────────────────────────
+
+type Leaf =
+  | { kind: 'quickRefFlights' }
+  | { kind: 'quickRefHotels' }
+  | { kind: 'day'; day: ContentDay };
 
 export async function renderTripAgendaPdf(
   payload: TripExportPayload,
@@ -441,39 +563,56 @@ export async function renderTripAgendaPdf(
   const rightX = MARGIN + dayColW + COL_GAP;
   const y0 = MARGIN;
 
-  const renderPage = (left: ContentDay | null, right: ContentDay | null): Content[] => [
-    ...(left ? agendaDayColumn(left, leftX, y0, dayColW, startHour, endHour) : []),
-    ...(right ? agendaDayColumn(right, rightX, y0, dayColW, startHour, endHour) : []),
+  // Half-hour row height derived from the chosen range so the grid always
+  // fills the column exactly — a 12-hour range gets taller rows than a
+  // 16-hour one, but neither leaves dead space or overflows the page.
+  const availableGridH = CONTENT_H - HEADER_H - RESERVED_TOP_H;
+  const slotH = availableGridH / ((endHour - startHour) * 2);
+
+  const renderLeaf = (leaf: Leaf | null, x0Pos: number): Content[] => {
+    if (!leaf) return [];
+    if (leaf.kind === 'quickRefFlights') return quickRefFlightsLeaf(payload, x0Pos, y0, dayColW);
+    if (leaf.kind === 'quickRefHotels') return quickRefHotelsLeaf(payload, x0Pos, y0, dayColW);
+    return agendaDayColumn(leaf.day, x0Pos, y0, dayColW, startHour, endHour, slotH);
+  };
+  const renderPage = (left: Leaf | null, right: Leaf | null): Content[] => [
+    ...renderLeaf(left, leftX),
+    ...renderLeaf(right, rightX),
   ];
 
   const items: Content[] = [];
 
   if (contentDays.length === 0) {
     items.push({ text: 'No scheduled days to display.', margin: [0, 60, 0, 0], alignment: 'center', color: C.muted } as Content);
-  } else if (opts?.booklet) {
-    const pageSlots = buildBookletPageSlots(contentDays.length);
-    pageSlots.forEach(([leftIdx, rightIdx], pageIndex) => {
-      const pageItems = renderPage(
-        leftIdx !== null ? contentDays[leftIdx] : null,
-        rightIdx !== null ? contentDays[rightIdx] : null,
-      );
-      if (pageIndex === 0) {
-        items.push(...pageItems);
-      } else {
-        items.push(Object.assign({ text: '' } as object, { pageBreak: 'before' }) as Content);
-        items.push(...pageItems);
-      }
-    });
   } else {
-    for (let i = 0; i < contentDays.length; i += 2) {
-      const pageItems = renderPage(contentDays[i], contentDays[i + 1] ?? null);
-      if (i === 0) {
-        items.push(...pageItems);
-      } else {
-        // Force a page break before this pair's first item; the rest are plain
-        // absolute items and don't affect the flow cursor.
-        items.push(Object.assign({ text: '' } as object, { pageBreak: 'before' }) as Content);
-        items.push(...pageItems);
+    const leaves: Leaf[] = [
+      { kind: 'quickRefFlights' },
+      { kind: 'quickRefHotels' },
+      ...contentDays.map((day): Leaf => ({ kind: 'day', day })),
+    ];
+
+    if (opts?.booklet) {
+      const pageSlots = buildBookletPageSlots(leaves.length);
+      pageSlots.forEach(([li, ri], pageIndex) => {
+        const pageItems = renderPage(li !== null ? leaves[li] : null, ri !== null ? leaves[ri] : null);
+        if (pageIndex === 0) {
+          items.push(...pageItems);
+        } else {
+          items.push(Object.assign({ text: '' } as object, { pageBreak: 'before' }) as Content);
+          items.push(...pageItems);
+        }
+      });
+    } else {
+      for (let i = 0; i < leaves.length; i += 2) {
+        const pageItems = renderPage(leaves[i], leaves[i + 1] ?? null);
+        if (i === 0) {
+          items.push(...pageItems);
+        } else {
+          // Force a page break before this pair's first item; the rest are plain
+          // absolute items and don't affect the flow cursor.
+          items.push(Object.assign({ text: '' } as object, { pageBreak: 'before' }) as Content);
+          items.push(...pageItems);
+        }
       }
     }
   }
